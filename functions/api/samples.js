@@ -1,7 +1,17 @@
 // Cloudflare Pages Function for handling wardrive samples
 // Automatically deployed as /api/samples
-// Uses geohash-based aggregated storage with time decay
+// Uses geohash-based SHARDED storage (shard:XXX keys) with time decay
 // Implements server-side de-duplication using per-sample IDs stored in KV with TTL
+
+// Shard prefix length: 3 chars = ~156km × 156km coverage areas
+const SHARD_PREFIX_LEN = 3;
+
+// Cells older than this are pruned from storage entirely
+const EXPIRY_DAYS = 90;
+
+function shardPrefix(hash) {
+  return hash.substring(0, SHARD_PREFIX_LEN);
+}
 
 // Simple geohash encoder (precision 7 = ~153m squares)
 function encodeGeohash(lat, lon, precision = 7) {
@@ -45,57 +55,6 @@ function encodeGeohash(lat, lon, precision = 7) {
   return geohash;
 }
 
-export async function onRequestGet(context) {
-  try {
-    // Check for version-based ETag
-    const version = await context.env.WARDRIVE_DATA.get('coverage_version') || '0';
-    const etag = `"v${version}"`;
-
-    // If client has current version, return 304
-    const ifNoneMatch = context.request.headers.get('If-None-Match');
-    if (ifNoneMatch === etag) {
-      return new Response(null, {
-        status: 304,
-        headers: {
-          'ETag': etag,
-          'Cache-Control': 'public, max-age=10',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
-
-    // Get aggregated coverage from KV storage
-    const coverageJson = await context.env.WARDRIVE_DATA.get('coverage');
-    
-    if (!coverageJson) {
-      return new Response(JSON.stringify({ coverage: {} }), {
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'ETag': etag,
-          'Cache-Control': 'public, max-age=10',
-        },
-      });
-    }
-    
-    const coverage = JSON.parse(coverageJson);
-    
-    return new Response(JSON.stringify({ coverage }), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'ETag': etag,
-        'Cache-Control': 'public, max-age=10',
-      },
-    });
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-}
-
 // Calculate age in days
 function ageInDays(timestamp) {
   const now = new Date();
@@ -104,96 +63,115 @@ function ageInDays(timestamp) {
   return Math.floor(diffMs / (1000 * 60 * 60 * 24));
 }
 
+// Prune expired cells from a shard object (mutates in place, returns pruned count)
+function pruneExpired(shard) {
+  let pruned = 0;
+  for (const hash of Object.keys(shard)) {
+    if (ageInDays(shard[hash].lastUpdate) > EXPIRY_DAYS) {
+      delete shard[hash];
+      pruned++;
+    }
+  }
+  return pruned;
+}
+
 // Apply time-based decay to existing coverage cell
 function applyDecay(cell) {
   const age = ageInDays(cell.lastUpdate);
-  
+
   let decayFactor = 1.0;
   if (age > 90) {
-    decayFactor = 0.2;      // 90+ days: 20% weight
+    decayFactor = 0.2;
   } else if (age > 30) {
-    decayFactor = 0.5;      // 30-90 days: 50% weight
+    decayFactor = 0.5;
   } else if (age > 14) {
-    decayFactor = 0.7;      // 14-30 days: 70% weight
+    decayFactor = 0.7;
   } else if (age > 7) {
-    decayFactor = 0.85;     // 7-14 days: 85% weight
+    decayFactor = 0.85;
   }
-  // else: <7 days = 100% weight (no decay)
-  
+
   cell.received *= decayFactor;
   cell.lost *= decayFactor;
-  
+
   return cell;
+}
+
+// Build shard index metadata for a single shard
+function buildShardMeta(shardData, previousVersion) {
+  const cells = Object.keys(shardData).length;
+  const samples = Object.values(shardData).reduce((sum, c) => sum + (c.samples || 0), 0);
+  const lastUpdate = Object.values(shardData).reduce(
+    (latest, c) => (c.lastUpdate > latest ? c.lastUpdate : latest), ''
+  );
+  return {
+    cells,
+    samples,
+    lastUpdate,
+    version: (previousVersion || 0) + 1,
+  };
 }
 
 // Aggregate samples by geohash
 function aggregateSamples(samples) {
   const coverage = {};
   const now = new Date().toISOString();
-  
+
   samples.forEach(sample => {
     const lat = sample.latitude || sample.lat;
     const lng = sample.longitude || sample.lng;
-    
+
     if (!lat || !lng) return;
-    
-    // Use precision 7 (~153m squares)
+
     const hash = encodeGeohash(lat, lng, 7);
-    
+
     if (!coverage[hash]) {
       coverage[hash] = {
         received: 0,
         lost: 0,
         samples: 0,
-        repeaters: {},  // Changed from nodes array to repeaters object
+        repeaters: {},
         firstSeen: sample.timestamp || now,
         lastUpdate: sample.timestamp || now,
-        appVersion: sample.appVersion || 'unknown' // Track app version
+        appVersion: sample.appVersion || 'unknown',
       };
     }
-    
-    // Determine ping success
-    const success = sample.pingSuccess === true || 
+
+    const success = sample.pingSuccess === true ||
                    (sample.nodeId && sample.nodeId !== 'Unknown');
     const failed = sample.pingSuccess === false || sample.nodeId === 'Unknown';
-    
-    // Update app version if this sample is newer
+
     if (sample.appVersion && sample.timestamp >= coverage[hash].lastUpdate) {
       coverage[hash].appVersion = sample.appVersion;
     }
-    
-    // Add weighted sample
+
     if (success) {
       coverage[hash].received += 1;
-      
-      // Store repeater details
+
       if (sample.nodeId && sample.nodeId !== 'Unknown') {
         const nodeId = sample.nodeId;
         const sampleTime = new Date(sample.timestamp || now).getTime();
-        
-        // Update if this is a newer sample for this repeater
-        if (!coverage[hash].repeaters[nodeId] || 
+
+        if (!coverage[hash].repeaters[nodeId] ||
             new Date(coverage[hash].repeaters[nodeId].lastSeen).getTime() < sampleTime) {
           coverage[hash].repeaters[nodeId] = {
-            name: sample.repeaterName || nodeId,  // Use friendly name if available
+            name: sample.repeaterName || nodeId,
             rssi: sample.rssi || null,
             snr: sample.snr || null,
-            lastSeen: sample.timestamp || now
+            lastSeen: sample.timestamp || now,
           };
         }
       }
     } else if (failed) {
       coverage[hash].lost += 1;
     }
-    
+
     coverage[hash].samples += 1;
-    
-    // Keep newest timestamp
+
     if (sample.timestamp > coverage[hash].lastUpdate) {
       coverage[hash].lastUpdate = sample.timestamp;
     }
   });
-  
+
   return coverage;
 }
 
@@ -212,97 +190,231 @@ function computeSampleId(sample) {
   return `h${Math.abs(h)}`;
 }
 
+// ==================== GET ====================
+export async function onRequestGet(context) {
+  try {
+    const url = new URL(context.request.url);
+    const prefixes = url.searchParams.get('prefixes');
+
+    // Global version for ETag
+    const version = await context.env.WARDRIVE_DATA.get('coverage_version') || '0';
+    const etag = `"v${version}"`;
+
+    const ifNoneMatch = context.request.headers.get('If-None-Match');
+    if (ifNoneMatch === etag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          'ETag': etag,
+          'Cache-Control': 'public, max-age=10',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    const commonHeaders = {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'ETag': etag,
+      'Cache-Control': 'public, max-age=10',
+    };
+
+    // --- Fetch specific shards by prefix ---
+    if (prefixes) {
+      const prefixList = prefixes.split(',').filter(Boolean);
+      const results = await Promise.all(
+        prefixList.map(p => context.env.WARDRIVE_DATA.get(`shard:${p}`))
+      );
+
+      const coverage = {};
+      results.forEach(json => {
+        if (json) Object.assign(coverage, JSON.parse(json));
+      });
+
+      return new Response(JSON.stringify({ coverage }), { headers: commonHeaders });
+    }
+
+    // --- Return shard index if available ---
+    const indexJson = await context.env.WARDRIVE_DATA.get('shard_index');
+    if (indexJson) {
+      const index = JSON.parse(indexJson);
+      let totalCells = 0, totalSamples = 0;
+      Object.values(index).forEach(m => {
+        totalCells += m.cells || 0;
+        totalSamples += m.samples || 0;
+      });
+
+      return new Response(JSON.stringify({
+        shards: index,
+        version: parseInt(version),
+        totalCells,
+        totalSamples,
+      }), { headers: commonHeaders });
+    }
+
+    // --- Legacy fallback: monolithic coverage key ---
+    const coverageJson = await context.env.WARDRIVE_DATA.get('coverage');
+    if (coverageJson) {
+      return new Response(JSON.stringify({
+        coverage: JSON.parse(coverageJson),
+      }), { headers: commonHeaders });
+    }
+
+    // No data at all
+    return new Response(JSON.stringify({
+      shards: {},
+      version: 0,
+      totalCells: 0,
+      totalSamples: 0,
+    }), { headers: commonHeaders });
+
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+// ==================== POST ====================
 export async function onRequestPost(context) {
   try {
     const body = await context.request.json();
-    
-    // Validate request
+
     if (!body.samples || !Array.isArray(body.samples)) {
       return new Response(JSON.stringify({ error: 'Invalid request: samples array required' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    
-    // Get existing coverage
-    const existingCoverageJson = await context.env.WARDRIVE_DATA.get('coverage');
-    let existingCoverage = existingCoverageJson ? JSON.parse(existingCoverageJson) : {};
-    
-    // De-duplicate samples (in-batch and against KV)
-    const incoming = Array.isArray(body.samples) ? body.samples : [];
+
+    // --- De-duplicate (in-batch + KV) ---
+    const incoming = body.samples;
     const batchUnique = [];
     const batchIds = new Set();
     for (const s of incoming) {
       const sid = computeSampleId(s);
-      if (batchIds.has(sid)) continue; // drop duplicates within the same upload
+      if (batchIds.has(sid)) continue;
       batchIds.add(sid);
       batchUnique.push({ ...s, __id: sid });
     }
-    // Filter out samples already seen (stored in KV)
-    const seenResults = await Promise.all(batchUnique.map(s => context.env.WARDRIVE_DATA.get(`seen:${s.__id}`)));
+
+    const seenResults = await Promise.all(
+      batchUnique.map(s => context.env.WARDRIVE_DATA.get(`seen:${s.__id}`))
+    );
     const deduped = batchUnique.filter((s, idx) => !seenResults[idx]);
 
-    // Aggregate new samples by geohash
+    // --- Aggregate new samples by geohash ---
     const newCoverage = aggregateSamples(deduped);
-    
-    // Merge with decay
-    Object.keys(existingCoverage).forEach(hash => {
-      applyDecay(existingCoverage[hash]);
+
+    // --- Group by shard prefix ---
+    const affectedPrefixes = {};
+    Object.entries(newCoverage).forEach(([hash, cell]) => {
+      const prefix = shardPrefix(hash);
+      if (!affectedPrefixes[prefix]) affectedPrefixes[prefix] = {};
+      affectedPrefixes[prefix][hash] = cell;
     });
-    
-    // Now overwrite cells with new data
-    let cellsUpdated = 0;
-    let cellsCreated = 0;
-    
-    Object.entries(newCoverage).forEach(([hash, newCell]) => {
-      if (existingCoverage[hash]) {
-        // OVERWRITE old data with new data (don't accumulate)
-        existingCoverage[hash].received = newCell.received;
-        existingCoverage[hash].lost = newCell.lost;
-        existingCoverage[hash].samples = newCell.samples;
-        existingCoverage[hash].repeaters = newCell.repeaters;
-        existingCoverage[hash].lastUpdate = newCell.lastUpdate;
-        existingCoverage[hash].appVersion = newCell.appVersion; // Update app version
-        cellsUpdated++;
+
+    const prefixKeys = Object.keys(affectedPrefixes);
+
+    if (prefixKeys.length === 0) {
+      return new Response(JSON.stringify({
+        success: true,
+        samplesReceived: incoming.length,
+        samplesDeduped: incoming.length,
+        samplesProcessed: 0,
+        cellsUpdated: 0,
+        cellsCreated: 0,
+        cellsPruned: 0,
+        totalCells: 0,
+      }), {
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      });
+    }
+
+    // --- Batch-read: shard index + affected shards + version ---
+    const [indexJson, currentVersionStr, ...existingShards] = await Promise.all([
+      context.env.WARDRIVE_DATA.get('shard_index'),
+      context.env.WARDRIVE_DATA.get('coverage_version'),
+      ...prefixKeys.map(p => context.env.WARDRIVE_DATA.get(`shard:${p}`)),
+    ]);
+
+    const shardIndex = indexJson ? JSON.parse(indexJson) : {};
+    const currentVersion = parseInt(currentVersionStr || '0');
+
+    let cellsUpdated = 0, cellsCreated = 0, cellsPruned = 0;
+    const writes = [];
+
+    prefixKeys.forEach((prefix, i) => {
+      let existing = existingShards[i] ? JSON.parse(existingShards[i]) : {};
+      const newCells = affectedPrefixes[prefix];
+
+      // Prune expired cells from existing shard
+      cellsPruned += pruneExpired(existing);
+
+      // Apply decay to surviving cells
+      Object.keys(existing).forEach(hash => applyDecay(existing[hash]));
+
+      // Merge new cells (overwrite matching, add new)
+      Object.entries(newCells).forEach(([hash, newCell]) => {
+        if (existing[hash]) {
+          existing[hash].received = newCell.received;
+          existing[hash].lost = newCell.lost;
+          existing[hash].samples = newCell.samples;
+          existing[hash].repeaters = newCell.repeaters;
+          existing[hash].lastUpdate = newCell.lastUpdate;
+          existing[hash].appVersion = newCell.appVersion;
+          cellsUpdated++;
+        } else {
+          existing[hash] = newCell;
+          cellsCreated++;
+        }
+      });
+
+      // Update shard index entry
+      shardIndex[prefix] = buildShardMeta(existing, shardIndex[prefix]?.version);
+
+      // Delete shard key if empty after pruning
+      if (Object.keys(existing).length === 0) {
+        writes.push(context.env.WARDRIVE_DATA.delete(`shard:${prefix}`));
+        delete shardIndex[prefix];
       } else {
-        // Brand new coverage square
-        existingCoverage[hash] = newCell;
-        cellsCreated++;
+        writes.push(context.env.WARDRIVE_DATA.put(`shard:${prefix}`, JSON.stringify(existing)));
       }
     });
-    
-    // Store updated coverage and increment version for ETag
-    const currentVersion = parseInt(await context.env.WARDRIVE_DATA.get('coverage_version') || '0');
-    await context.env.WARDRIVE_DATA.put('coverage', JSON.stringify(existingCoverage));
-    await context.env.WARDRIVE_DATA.put('coverage_version', String(currentVersion + 1));
 
-    // Mark processed samples as seen with TTL (90 days)
-    // Wrap in try-catch to prevent 500 error if marking fails
-    // (data is already saved, so we don't want to fail the request)
-    let seenMarked = 0;
+    // Write shard index + bump global version
+    writes.push(context.env.WARDRIVE_DATA.put('shard_index', JSON.stringify(shardIndex)));
+    writes.push(context.env.WARDRIVE_DATA.put('coverage_version', String(currentVersion + 1)));
+    await Promise.all(writes);
+
+    // Mark processed samples as seen (90-day TTL)
     try {
       const ttlSeconds = 60 * 60 * 24 * 90;
-      await Promise.all(deduped.map(s => context.env.WARDRIVE_DATA.put(`seen:${s.__id}`, '1', { expirationTtl: ttlSeconds })));
-      seenMarked = deduped.length;
+      await Promise.all(
+        deduped.map(s => context.env.WARDRIVE_DATA.put(`seen:${s.__id}`, '1', { expirationTtl: ttlSeconds }))
+      );
     } catch (seenError) {
-      // Log error but don't fail the request since data is already saved
       console.error('Failed to mark samples as seen:', seenError.message);
     }
-    
-    return new Response(JSON.stringify({ 
-      success: true, 
+
+    // Total cells from index
+    let totalCells = 0;
+    Object.values(shardIndex).forEach(m => { totalCells += m.cells || 0; });
+
+    return new Response(JSON.stringify({
+      success: true,
       samplesReceived: incoming.length,
       samplesDeduped: incoming.length - deduped.length,
       samplesProcessed: deduped.length,
-      cellsUpdated: cellsUpdated,
-      cellsCreated: cellsCreated,
-      totalCells: Object.keys(existingCoverage).length
+      cellsUpdated,
+      cellsCreated,
+      cellsPruned,
+      totalCells,
     }), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
+
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
@@ -311,38 +423,35 @@ export async function onRequestPost(context) {
   }
 }
 
-// Handle DELETE request to clear all data
-// SECURED: Requires authentication token
+// ==================== DELETE ====================
 export async function onRequestDelete(context) {
   try {
-    // Check for authorization header
     const authHeader = context.request.headers.get('Authorization');
-    const adminToken = context.env.ADMIN_TOKEN; // Set this in Cloudflare Pages settings
-    
-    // Verify token
+    const adminToken = context.env.ADMIN_TOKEN;
+
     if (!authHeader || authHeader !== `Bearer ${adminToken}`) {
-      return new Response(JSON.stringify({ 
-        error: 'Unauthorized: Invalid or missing authentication token'
+      return new Response(JSON.stringify({
+        error: 'Unauthorized: Invalid or missing authentication token',
       }), {
         status: 401,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
       });
     }
-    
-    // Delete the coverage key from KV
+
+    // Delete all shards listed in index
+    const indexJson = await context.env.WARDRIVE_DATA.get('shard_index');
+    if (indexJson) {
+      const index = JSON.parse(indexJson);
+      const deletes = Object.keys(index).map(p => context.env.WARDRIVE_DATA.delete(`shard:${p}`));
+      deletes.push(context.env.WARDRIVE_DATA.delete('shard_index'));
+      await Promise.all(deletes);
+    }
+
+    // Also delete legacy key if it exists
     await context.env.WARDRIVE_DATA.delete('coverage');
-    
-    return new Response(JSON.stringify({ 
-      success: true,
-      message: 'All data cleared'
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
+
+    return new Response(JSON.stringify({ success: true, message: 'All data cleared' }), {
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), {
@@ -352,7 +461,7 @@ export async function onRequestDelete(context) {
   }
 }
 
-// Handle CORS preflight
+// ==================== CORS ====================
 export async function onRequestOptions() {
   return new Response(null, {
     headers: {

@@ -112,6 +112,14 @@ let measureUnit = 'km';
 let measureMarkers = [];
 let measureLine = null;
 
+// Shard state (KV sharding)
+let shardIndex = {};            // { prefix: { cells, samples, lastUpdate, version } }
+let cachedShardVersions = {};   // { prefix: version } - tracks fetched shard versions
+let shardLoadPending = false;   // Prevents concurrent shard loads
+
+// Expiry: cells older than this are not rendered
+const EXPIRY_DAYS = 90;
+
 // ---------------------
 // Utility functions
 // ---------------------
@@ -195,6 +203,9 @@ function renderVisibleCoverage() {
             if (cellDate > timelapseDate) return;
         }
 
+        // Expiry filter: hide cells older than 90 days
+        if (ageInDays(cell.lastUpdate) > EXPIRY_DAYS) return;
+
         const bounds = geohashToBounds(hash);
         const cellBounds = L.latLngBounds(bounds);
 
@@ -265,6 +276,9 @@ function aggregateAtPrecision(coverage, targetPrecision) {
     const aggregated = {};
 
     Object.entries(coverage).forEach(([hash, cell]) => {
+        // Expiry filter: skip cells older than 90 days
+        if (ageInDays(cell.lastUpdate) > EXPIRY_DAYS) return;
+
         // Time-lapse filter for aggregation
         if (timelapseActive && timelapseDate) {
             const cellDate = new Date(cell.lastUpdate);
@@ -570,7 +584,124 @@ function resetTimelapse() {
 }
 
 // ---------------------
-// Data loading with ETag caching
+// Shard-aware data loading
+// ---------------------
+
+// Determine which 3-char geohash prefixes are visible in the current viewport
+function getVisiblePrefixes() {
+    const bounds = map.getBounds();
+    const visible = [];
+
+    Object.keys(shardIndex).forEach(prefix => {
+        try {
+            const b = Geohash.bounds(prefix);
+            const prefixBounds = L.latLngBounds([b.sw.lat, b.sw.lon], [b.ne.lat, b.ne.lon]);
+            if (bounds.intersects(prefixBounds)) {
+                visible.push(prefix);
+            }
+        } catch(e) {
+            visible.push(prefix); // Include if bounds check fails
+        }
+    });
+
+    return visible;
+}
+
+// Fetch specific shard prefixes from the API
+async function loadShardData(prefixList) {
+    if (prefixList.length === 0) return;
+
+    try {
+        const resp = await fetch(`/api/samples?prefixes=${prefixList.join(',')}`);
+        if (!resp.ok) {
+            console.error('Failed to load shards:', resp.status);
+            return;
+        }
+
+        const data = await resp.json();
+        if (!data.coverage) return;
+
+        // Merge into cached coverage
+        Object.entries(data.coverage).forEach(([hash, cell]) => {
+            cachedCoverage[hash] = cell;
+        });
+
+        // Mark these prefixes as fetched at current version
+        prefixList.forEach(p => {
+            if (shardIndex[p]) {
+                cachedShardVersions[p] = shardIndex[p].version;
+            }
+        });
+    } catch(e) {
+        console.error('Error loading shard data:', e);
+    }
+}
+
+// Load visible shards that are new or have changed
+async function loadVisibleShards() {
+    const visible = getVisiblePrefixes();
+    const toFetch = visible.filter(p => {
+        const remote = shardIndex[p];
+        const cached = cachedShardVersions[p];
+        return remote && (cached === undefined || cached !== remote.version);
+    });
+
+    if (toFetch.length === 0) return false;
+
+    await loadShardData(toFetch);
+    return true;
+}
+
+// Update stats from cached coverage data
+function updateStatsFromCoverage() {
+    if (!cachedCoverage) return;
+
+    const uniqueNodes = new Set();
+    let totalSamples = 0;
+
+    Object.values(cachedCoverage).forEach(cell => {
+        if (cell.repeaters && typeof cell.repeaters === 'object') {
+            Object.keys(cell.repeaters).forEach(nodeId => uniqueNodes.add(nodeId.substring(0, 2)));
+        }
+        totalSamples += cell.samples || 0;
+    });
+
+    document.getElementById('total-samples').textContent = totalSamples.toLocaleString();
+    document.getElementById('unique-nodes').textContent = uniqueNodes.size;
+    document.getElementById('last-update').textContent = new Date().toLocaleString();
+}
+
+// Update node count from loaded data
+function updateNodeCount() {
+    const uniqueNodes = new Set();
+    Object.values(cachedCoverage).forEach(cell => {
+        if (cell.repeaters && typeof cell.repeaters === 'object') {
+            Object.keys(cell.repeaters).forEach(nodeId => uniqueNodes.add(nodeId.substring(0, 2)));
+        }
+    });
+    document.getElementById('unique-nodes').textContent = uniqueNodes.size;
+}
+
+// Handle viewport changes — load new shards as user pans/zooms
+async function onViewportChange() {
+    scheduleRender();
+
+    if (Object.keys(shardIndex).length > 0 && !shardLoadPending) {
+        shardLoadPending = true;
+        try {
+            const loaded = await loadVisibleShards();
+            if (loaded) {
+                updateNodeCount();
+                scheduleRender();
+            }
+        } finally {
+            shardLoadPending = false;
+        }
+    }
+}
+
+// ---------------------
+// Data loading with ETag caching (shard-aware)
 // ---------------------
 async function loadData() {
     try {
@@ -581,7 +712,7 @@ async function loadData() {
 
         const response = await fetch('/api/samples', { headers });
 
-        // 304 Not Modified - data hasn't changed
+        // 304 Not Modified — data hasn't changed
         if (response.status === 304) {
             console.log('Data unchanged (304)');
             return;
@@ -592,38 +723,37 @@ async function loadData() {
         if (etag) currentETag = etag;
 
         const data = await response.json();
-
         document.getElementById('loading').style.display = 'none';
 
-        if (!data.coverage || Object.keys(data.coverage).length === 0) {
-            console.log('No coverage data found');
+        // --- Legacy format (pre-migration) ---
+        if (data.coverage) {
+            cachedCoverage = data.coverage;
+            updateStatsFromCoverage();
+            if (timelapseActive) initTimelapse();
+            scheduleRender();
             return;
         }
 
-        cachedCoverage = data.coverage;
+        // --- Sharded format ---
+        if (data.shards) {
+            shardIndex = data.shards;
 
-        // Update stats
-        const uniqueNodes = new Set();
-        let totalSamples = 0;
+            // Show stats from index metadata immediately
+            document.getElementById('total-samples').textContent = (data.totalSamples || 0).toLocaleString();
+            document.getElementById('last-update').textContent = new Date().toLocaleString();
 
-        Object.values(data.coverage).forEach(cell => {
-            if (cell.repeaters && typeof cell.repeaters === 'object') {
-                Object.keys(cell.repeaters).forEach(nodeId => {
-                    uniqueNodes.add(nodeId.substring(0, 2));
-                });
-            }
-            totalSamples += cell.samples || 0;
-        });
+            // Load visible shards
+            await loadVisibleShards();
 
-        document.getElementById('total-samples').textContent = totalSamples.toLocaleString();
-        document.getElementById('unique-nodes').textContent = uniqueNodes.size;
-        document.getElementById('last-update').textContent = new Date().toLocaleString();
+            // Update node count from actual loaded data
+            updateNodeCount();
 
-        // Initialize time-lapse date range if active
-        if (timelapseActive) initTimelapse();
+            if (timelapseActive) initTimelapse();
+            scheduleRender();
+            return;
+        }
 
-        // Render only visible cells
-        scheduleRender();
+        console.log('No coverage data found');
 
     } catch (error) {
         console.error('Error loading data:', error);
@@ -642,8 +772,8 @@ function changeResolution() {
 // ---------------------
 // Map event handlers for viewport rendering
 // ---------------------
-map.on('moveend', scheduleRender);
-map.on('zoomend', scheduleRender);
+map.on('moveend', onViewportChange);
+map.on('zoomend', onViewportChange);
 
 // ---------------------
 // Toggle functions
