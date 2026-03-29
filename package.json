@@ -1,0 +1,17 @@
+{
+  "name": "meshwar-map",
+  "version": "1.0.0",
+  "description": "MeshCore Wardrive Map - Self-hosted server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "express": "^4.18.0",
+    "ioredis": "^5.3.0",
+    "ngeohash": "^0.6.3",
+    "pg": "^8.11.0"
+  }
+}
