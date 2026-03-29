@@ -89,7 +89,7 @@ Final result:
 
 Create a test upload:
 ```bash
-curl -X POST https://meshwar-map.pages.dev/api/samples \
+curl -X POST https://wardrive.inwmesh.org/api/samples \
   -H "Content-Type: application/json" \
   -d '{
     "samples": [
@@ -117,7 +117,7 @@ Expected response:
 
 ### 2. Verify on Map
 
-Visit https://meshwar-map.pages.dev and check:
+Visit https://wardrive.inwmesh.org and check:
 - ✅ Coverage squares appear
 - ✅ Clicking square shows "🟢 Live Coverage"
 - ✅ Success rate displays correctly
@@ -128,7 +128,7 @@ Visit https://meshwar-map.pages.dev and check:
 
 Upload old data:
 ```bash
-curl -X POST https://meshwar-map.pages.dev/api/samples \
+curl -X POST https://wardrive.inwmesh.org/api/samples \
   -H "Content-Type: application/json" \
   -d '{
     "samples": [
@@ -149,34 +149,15 @@ Check map shows:
 
 ## Deployment
 
-### Option 1: Direct Deploy (Recommended)
+### Deploy
 
 ```bash
-cd /home/chuck/Desktop/meshcore-map-site
-
-# Deploy to Cloudflare Pages
-# (This will trigger automatic deployment if connected to Git)
+cd meshwar-map
 git add .
 git commit -m "Migrate to geohash-based aggregated storage"
 git push origin main
+ssh apollo "cd ~/docker/meshwar-map && git pull && docker compose up -d --build app"
 ```
-
-### Option 2: Manual Deploy
-
-If using Wrangler:
-```bash
-cd /home/chuck/Desktop/meshcore-map-site
-npx wrangler pages publish .
-```
-
-### Option 3: Test Locally
-
-```bash
-cd /home/chuck/Desktop/meshcore-map-site
-npx wrangler pages dev . --kv WARDRIVE_DATA
-```
-
-Then visit http://localhost:8788
 
 ## Migration Notes
 
@@ -216,7 +197,7 @@ The Android app will continue to upload raw samples. The backend API automatical
 If issues arise, revert by:
 
 ```bash
-cd /home/chuck/Desktop/meshcore-map-site
+cd meshwar-map
 git revert HEAD
 git push origin main
 ```
@@ -235,11 +216,11 @@ Then restore old samples data from backup (if needed).
 
 - Check the API response for errors
 - Inspect browser console for frontend issues
-- Verify KV storage in Cloudflare dashboard
+- Check logs with `ssh apollo "docker compose -f ~/docker/meshwar-map/docker-compose.yml logs -f app"`
 
 ## Next Steps
 
-1. ✅ Deploy to Cloudflare Pages
+1. ✅ Deploy to wardrive.inwmesh.org
 2. ✅ Test with sample uploads
 3. ✅ Monitor for 24 hours
 4. ✅ Ask users to test

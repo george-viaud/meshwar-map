@@ -72,7 +72,7 @@ curl -X DELETE http://localhost:8788/api/samples \
 ## Deployment
 
 ```bash
-cd /home/chuck/Desktop/meshcore-map-site
+cd meshwar-map
 git add .
 git commit -m "Implement geohash-based aggregated storage with time decay"
 git push origin main

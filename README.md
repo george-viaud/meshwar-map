@@ -1,140 +1,65 @@
 # MeshCore Wardrive Map
 
-Live web map for displaying MeshCore wardrive data collected from your Flutter app.
+Live web map for displaying MeshCore wardrive data collected from the Android app.
+Hosted at **https://wardrive.inwmesh.org**
 
 ## Features
 
-- 🗺️ Dark theme map (CartoDB Dark Matter tiles)
-- 📡 Real-time sample display with GPS locations
-- 📊 Statistics panel (total samples, unique nodes, avg RSSI)
-- 🔄 Auto-refresh every 30 seconds
-- ☁️ Cloudflare Pages hosting (free)
-- 💾 KV storage for data persistence
+- Dark/light theme map (CartoDB / OpenStreetMap tiles)
+- Real-time coverage display with geohash grid squares
+- Statistics panel (total samples, unique nodes)
+- Auto-refresh every 30 seconds
+- Heatmap layer and repeater marker overlays
+- Time-lapse playback of historical coverage
+- Distance measure tool
 
-## Deployment Steps
+## Self-Hosting
 
-### 1. Initialize Git Repository
-
-```bash
-cd /home/chuck/Desktop/meshcore-map-site
-git init
-git add .
-git commit -m "Initial commit: MeshCore wardrive map"
-```
-
-### 2. Push to GitHub
-
-```bash
-# Create a new repo on GitHub (https://github.com/new)
-# Name it: meshcore-map (or whatever you prefer)
-# Then push:
-
-git remote add origin https://github.com/YOUR_USERNAME/meshcore-map.git
-git branch -M main
-git push -u origin main
-```
-
-### 3. Deploy to Cloudflare Pages
-
-1. Go to https://dash.cloudflare.com/
-2. Click **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**
-3. Select your GitHub repo: `meshcore-map`
-4. Configure:
-   - **Project name**: `meshcore-map` (or your choice - this becomes your URL)
-   - **Production branch**: `main`
-   - **Build settings**: None needed (static site)
-5. Click **Save and Deploy**
-
-### 4. Set Up KV Storage
-
-1. In Cloudflare dashboard, go to **Workers & Pages** → **KV**
-2. Click **Create a namespace**
-3. Name it: `WARDRIVE_DATA`
-4. Go back to your Pages project → **Settings** → **Functions** → **KV namespace bindings**
-5. Add binding:
-   - **Variable name**: `WARDRIVE_DATA`
-   - **KV namespace**: Select the one you just created
-6. Click **Save**
-
-### 5. Your Site is Live! 🎉
-
-Your map will be available at:
-```
-https://meshcore-map.pages.dev
-```
-(or whatever project name you chose)
+See [SELF_HOSTING.md](SELF_HOSTING.md) for full Docker deployment instructions
+(Node.js + PostgreSQL + Redis).
 
 ## API Endpoints
 
 ### GET `/api/samples`
-Returns all stored samples as JSON.
+Returns the shard index with coverage metadata.
 
-**Response:**
-```json
-{
-  "samples": [
-    {
-      "nodeId": "ABC123",
-      "latitude": 47.6062,
-      "longitude": -122.3321,
-      "rssi": -95,
-      "snr": 8,
-      "timestamp": "2026-01-06T00:00:00Z"
-    }
-  ]
-}
-```
+### GET `/api/samples?prefixes=xyz,abc`
+Returns coverage cell data for the specified geohash shard prefixes.
 
 ### POST `/api/samples`
-Upload new samples from your Flutter app.
+Upload new samples from the Android app.
 
-**Request:**
 ```json
 {
   "samples": [
     {
       "nodeId": "ABC123",
-      "latitude": 47.6062,
-      "longitude": -122.3321,
+      "latitude": 47.6588,
+      "longitude": -117.4260,
       "rssi": -95,
       "snr": 8,
-      "timestamp": "2026-01-06T00:00:00Z"
+      "pingSuccess": true,
+      "timestamp": "2026-01-06T00:00:00Z",
+      "appVersion": "1.0.24"
     }
   ]
 }
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "added": 1,
-  "total": 1234
-}
-```
+### DELETE `/api/samples`
+Wipe all data. Requires `Authorization: Bearer <ADMIN_TOKEN>` header.
 
-## Next Steps
+## Android App
 
-After deployment, update your Flutter app to upload samples to:
-```
-https://your-project-name.pages.dev/api/samples
-```
+The companion Android app is at:
+https://github.com/george-viaud/Meshcore-Wardrive-Android
 
-The Flutter app changes will be provided separately.
+Upload endpoint: `https://wardrive.inwmesh.org/api/samples`
 
-## Storage Limits
+## Credits
 
-- Free tier: 100,000 reads/day, 1,000 writes/day
-- Keeps last 10,000 samples (older ones auto-deleted)
-- Each upload can contain multiple samples
+Originally inspired by mesh-map.pages.dev by Kyle Reed for MeshCore coverage mapping.
 
-## Local Testing
+## License
 
-To test locally, you can use `wrangler` (Cloudflare CLI):
-
-```bash
-npm install -g wrangler
-wrangler pages dev .
-```
-
-This will start a local server at `http://localhost:8788`
+GNU General Public License v3.0
