@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeshCore Wardrive — Admin</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #121212;
+    --surface: rgba(30,30,30,0.97);
+    --surface-2: rgba(40,40,40,0.95);
+    --border: #2a2a2a;
+    --border-light: #333;
+    --accent: #00e676;
+    --accent-dim: rgba(0,230,118,0.12);
+    --accent-hover: #00ff85;
+    --danger: #f44336;
+    --danger-dim: rgba(244,67,54,0.12);
+    --warn: #ff9800;
+    --text: #ffffff;
+    --text-secondary: #aaa;
+    --text-muted: #666;
+    --mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ── Scrollbar ─────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+  /* ── Utility ───────────────────────────────────────── */
+  .hidden { display: none !important; }
+
+  /* ── Login ─────────────────────────────────────────── */
+  #login-view {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0,230,118,0.06) 0%, transparent 60%),
+      var(--bg);
+  }
+
+  .login-card {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    padding: 40px 36px 36px;
+    width: 360px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  }
+
+  .login-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+
+  .login-logo-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+    flex-shrink: 0;
+  }
+
+  .login-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.01em;
+  }
+
+  .login-subtitle {
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* ── Forms ─────────────────────────────────────────── */
+  .field { margin-bottom: 14px; }
+
+  .field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+
+  .field input, .field select {
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 9px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .field input:focus, .field select:focus {
+    border-color: var(--accent);
+    background: rgba(0,230,118,0.04);
+  }
+
+  .field select option { background: #1e1e1e; }
+
+  /* ── Buttons ───────────────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+    width: 100%;
+    justify-content: center;
+    padding: 11px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 6px;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:active { transform: scale(0.99); }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-secondary);
+    border-color: var(--border-light);
+  }
+  .btn-secondary:hover { border-color: #555; color: var(--text); }
+
+  .btn-accent {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: rgba(0,230,118,0.2);
+  }
+  .btn-accent:hover { background: rgba(0,230,118,0.18); }
+
+  .btn-danger {
+    background: var(--danger-dim);
+    color: var(--danger);
+    border-color: rgba(244,67,54,0.2);
+  }
+  .btn-danger:hover { background: rgba(244,67,54,0.2); }
+
+  .btn-warn {
+    background: rgba(255,152,0,0.1);
+    color: var(--warn);
+    border-color: rgba(255,152,0,0.2);
+  }
+  .btn-warn:hover { background: rgba(255,152,0,0.18); }
+
+  .btn-icon {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: color 0.15s, background 0.15s;
+    line-height: 1;
+  }
+  .btn-icon:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+  .btn-icon.danger:hover { color: var(--danger); background: var(--danger-dim); }
+  .btn-icon:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Error / info messages ─────────────────────────── */
+  .msg {
+    font-size: 13px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    margin-top: 12px;
+  }
+  .msg-error { background: var(--danger-dim); color: #ff6b6b; border: 1px solid rgba(244,67,54,0.2); }
+  .msg-success { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,230,118,0.2); }
+
+  /* ── Dashboard layout ──────────────────────────────── */
+  #dashboard-view { display: flex; flex-direction: column; min-height: 100vh; }
+
+  .app-header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 52px;
+    background: rgba(18,18,18,0.96);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    z-index: 100;
+  }
+
+  .app-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .header-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  .app-header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .app-header-right .user-label strong { color: var(--text); }
+  .app-header-right .role-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid rgba(0,230,118,0.2);
+    margin-left: 5px;
+  }
+  .role-badge.viewer { background: rgba(170,170,170,0.1); color: var(--text-muted); border-color: #333; }
+
+  .signout-btn {
+    background: transparent;
+    border: 1px solid var(--border-light);
+    color: var(--text-secondary);
+    padding: 5px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .signout-btn:hover { border-color: #555; color: var(--text); }
+
+  /* ── Tabs ──────────────────────────────────────────── */
+  .tab-bar {
+    position: fixed;
+    top: 52px; left: 0; right: 0;
+    height: 44px;
+    background: rgba(18,18,18,0.92);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: flex-end;
+    padding: 0 20px;
+    gap: 0;
+    z-index: 99;
+  }
+
+  .tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    padding: 0 16px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── Main content ──────────────────────────────────── */
+  .main-content {
+    margin-top: 96px;
+    padding: 24px 20px;
+    max-width: 960px;
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ── Tab panels ────────────────────────────────────── */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Section header ────────────────────────────────── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-secondary);
+  }
+
+  /* ── Inline create form ────────────────────────────── */
+  .create-form {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .create-form .field { margin-bottom: 0; flex: 1; min-width: 140px; }
+  .create-form .field label { margin-bottom: 5px; }
+  .create-form-actions { display: flex; gap: 8px; align-items: flex-end; padding-top: 1px; }
+
+  /* ── Table ─────────────────────────────────────────── */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead th {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.2);
+    white-space: nowrap;
+  }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+
+  tbody td {
+    padding: 11px 14px;
+    vertical-align: middle;
+  }
+
+  .td-key {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+  }
+
+  .td-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  .td-note-wrap { display: flex; align-items: center; gap: 6px; }
+  .td-note-text { color: var(--text-secondary); flex: 1; }
+  .td-note-text.empty { color: var(--text-muted); font-style: italic; font-size: 12px; }
+
+  .inline-edit-wrap { display: flex; align-items: center; gap: 6px; width: 100%; }
+  .inline-edit-input {
+    flex: 1;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 5px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    min-width: 120px;
+  }
+
+  .inline-pw-wrap { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .inline-pw-input {
+    flex: 1;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--warn);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 5px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    min-width: 140px;
+  }
+
+  /* ── Status badge ──────────────────────────────────── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+  .badge-enabled { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,230,118,0.2); }
+  .badge-enabled::before { background: var(--accent); }
+  .badge-disabled { background: var(--danger-dim); color: #f44336; border: 1px solid rgba(244,67,54,0.2); }
+  .badge-disabled::before { background: var(--danger); }
+
+  /* ── Role badge ────────────────────────────────────── */
+  .role-pill {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .role-pill.admin { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,230,118,0.2); }
+  .role-pill.viewer { background: rgba(170,170,170,0.08); color: var(--text-muted); border: 1px solid #333; }
+
+  /* ── Empty state ───────────────────────────────────── */
+  .empty-state {
+    padding: 48px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+  .empty-state-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.4; }
+
+  /* ── Modal ─────────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.15s ease;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+
+  .modal-card {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    padding: 28px;
+    width: 420px;
+    max-width: calc(100vw - 32px);
+    box-shadow: 0 32px 80px rgba(0,0,0,0.7);
+    animation: slideUp 0.2s ease;
+  }
+
+  .modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--accent);
+  }
+
+  .modal-subtitle {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+  }
+
+  .key-display {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(0,230,118,0.25);
+    border-radius: 8px;
+    padding: 16px 20px;
+    text-align: center;
+    margin-bottom: 16px;
+  }
+
+  .key-display .key-value {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    display: block;
+    text-shadow: 0 0 20px rgba(0,230,118,0.3);
+  }
+
+  .key-display .key-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+  }
+
+  .modal-warning {
+    font-size: 12px;
+    color: var(--warn);
+    background: rgba(255,152,0,0.08);
+    border: 1px solid rgba(255,152,0,0.2);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+  }
+
+  .modal-actions { display: flex; gap: 10px; }
+
+  /* ── Row error ─────────────────────────────────────── */
+  .row-error {
+    font-size: 12px;
+    color: var(--danger);
+    padding: 4px 0;
+  }
+
+  /* ── Date ──────────────────────────────────────────── */
+  .td-date { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+
+  /* ── Loading spinner ───────────────────────────────── */
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(0,230,118,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-row td { padding: 32px; text-align: center; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<!-- ── Login ──────────────────────────────────────────── -->
+<div id="login-view">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-dot"></div>
+      <div>
+        <div class="login-title">MeshCore Wardrive</div>
+        <div class="login-subtitle">Admin Panel</div>
+      </div>
+    </div>
+    <form id="login-form" autocomplete="on">
+      <div class="field">
+        <label for="login-username">Username</label>
+        <input id="login-username" type="text" name="username" autocomplete="username" placeholder="admin" required>
+      </div>
+      <div class="field">
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" name="password" autocomplete="current-password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn btn-primary" id="login-btn">Sign In</button>
+      <div id="login-error" class="hidden"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Dashboard ──────────────────────────────────────── -->
+<div id="dashboard-view" class="hidden">
+
+  <header class="app-header">
+    <div class="app-header-left">
+      <div class="header-dot"></div>
+      MeshCore Wardrive Admin
+    </div>
+    <div class="app-header-right">
+      <span class="user-label">
+        Logged in as: <strong id="header-username">—</strong>
+        <span id="header-role-badge" class="role-badge"></span>
+      </span>
+      <button class="signout-btn" onclick="signOut()">Sign Out</button>
+    </div>
+  </header>
+
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tab-keys-btn" onclick="switchTab('keys')">API Keys</button>
+    <button class="tab-btn" id="tab-users-btn" onclick="switchTab('users')">Users</button>
+  </div>
+
+  <div class="main-content">
+
+    <!-- ── API Keys tab ──────────────────────────────── -->
+    <div class="tab-panel active" id="panel-keys">
+      <div class="section-header">
+        <span class="section-title">API Keys</span>
+        <button class="btn btn-accent" id="btn-gen-key" onclick="toggleCreateKeyForm()">+ Generate New Key</button>
+      </div>
+
+      <div id="create-key-form" class="create-form hidden">
+        <div class="field">
+          <label>Note <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0">(optional — e.g. "George's phone")</span></label>
+          <input type="text" id="new-key-note" placeholder="Device or person name" maxlength="200">
+        </div>
+        <div class="create-form-actions">
+          <button class="btn btn-accent" onclick="createKey()">Create</button>
+          <button class="btn btn-secondary" onclick="toggleCreateKeyForm()">Cancel</button>
+        </div>
+        <div id="create-key-error" class="hidden" style="width:100%;margin-top:4px;"></div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Note</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th id="keys-actions-header">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="keys-tbody">
+            <tr class="loading-row"><td colspan="5"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Users tab ─────────────────────────────────── -->
+    <div class="tab-panel" id="panel-users">
+      <div class="section-header">
+        <span class="section-title">Admin Users</span>
+        <button class="btn btn-accent" onclick="toggleCreateUserForm()">+ Add User</button>
+      </div>
+
+      <div id="create-user-form" class="create-form hidden">
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="new-user-username" placeholder="username" maxlength="64">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="new-user-password" placeholder="••••••••">
+        </div>
+        <div class="field" style="flex:0;min-width:120px">
+          <label>Role</label>
+          <select id="new-user-role">
+            <option value="viewer">Viewer</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="create-form-actions">
+          <button class="btn btn-accent" onclick="createUser()">Create</button>
+          <button class="btn btn-secondary" onclick="toggleCreateUserForm()">Cancel</button>
+        </div>
+        <div id="create-user-error" class="hidden" style="width:100%;margin-top:4px;"></div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="users-tbody">
+            <tr class="loading-row"><td colspan="5"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Key reveal modal ───────────────────────────────── -->
+<div id="key-modal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <div class="modal-title">New API Key Generated</div>
+    <div class="modal-subtitle">Copy this key now — it will not be shown again.</div>
+    <div class="key-display">
+      <span class="key-value" id="modal-key-value">—</span>
+      <div class="key-note" id="modal-key-note"></div>
+    </div>
+    <div class="modal-warning">⚠ This key is shown only once. Store it somewhere safe before closing.</div>
+    <div class="modal-actions">
+      <button class="btn btn-accent" style="flex:1;justify-content:center" onclick="copyKey()">Copy to Clipboard</button>
+      <button class="btn btn-secondary" onclick="closeKeyModal()">Done</button>
+    </div>
+    <div id="modal-copy-msg" class="hidden" style="margin-top:10px;font-size:12px;color:var(--accent);text-align:center;">Copied!</div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────
+let currentUser = null; // { userId, username, role }
+let keysData = [];
+let usersData = [];
+
+// ── JWT helpers ────────────────────────────────────────
+function decodeJwt(token) {
+  try {
+    const payload = token.split('.')[1];
+    const padded = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(padded.padEnd(padded.length + (4 - padded.length % 4) % 4, '='));
+    return JSON.parse(json);
+  } catch { return null; }
+}
+
+function getToken() { return sessionStorage.getItem('wdm_token'); }
+function getUser()  { return JSON.parse(sessionStorage.getItem('wdm_user') || 'null'); }
+
+function saveSession(token, username, role) {
+  sessionStorage.setItem('wdm_token', token);
+  sessionStorage.setItem('wdm_user', JSON.stringify({ username, role }));
+}
+
+function clearSession() {
+  sessionStorage.removeItem('wdm_token');
+  sessionStorage.removeItem('wdm_user');
+}
+
+// ── API helper ─────────────────────────────────────────
+async function api(method, path, body) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(path, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401) {
+    clearSession();
+    showLogin();
+    throw new Error('Session expired');
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// ── View switching ─────────────────────────────────────
+function showLogin() {
+  document.getElementById('login-view').classList.remove('hidden');
+  document.getElementById('dashboard-view').classList.add('hidden');
+}
+
+function showDashboard() {
+  const user = getUser();
+  if (!user) { showLogin(); return; }
+  currentUser = user;
+  document.getElementById('login-view').classList.add('hidden');
+  document.getElementById('dashboard-view').classList.remove('hidden');
+  document.getElementById('header-username').textContent = user.username;
+  const badge = document.getElementById('header-role-badge');
+  badge.textContent = user.role;
+  badge.className = 'role-badge' + (user.role === 'viewer' ? ' viewer' : '');
+
+  // Viewer: hide users tab and actions column
+  if (user.role === 'viewer') {
+    document.getElementById('tab-users-btn').classList.add('hidden');
+    document.getElementById('btn-gen-key').classList.add('hidden');
+    document.getElementById('keys-actions-header').classList.add('hidden');
+  }
+
+  loadKeys();
+  if (user.role === 'admin') loadUsers();
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+  document.getElementById('tab-' + tab + '-btn').classList.add('active');
+}
+
+function signOut() {
+  clearSession();
+  showLogin();
+}
+
+// ── Login ──────────────────────────────────────────────
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('login-btn');
+  const errEl = document.getElementById('login-error');
+  errEl.classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  try {
+    const data = await api('POST', '/api/auth/login', {
+      username: document.getElementById('login-username').value.trim(),
+      password: document.getElementById('login-password').value,
+    });
+    saveSession(data.token, data.username, data.role);
+    document.getElementById('login-password').value = '';
+    showDashboard();
+  } catch (err) {
+    errEl.className = 'msg msg-error';
+    errEl.textContent = err.message === 'Invalid credentials' ? 'Invalid username or password.' : err.message;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+});
+
+// ── Keys ───────────────────────────────────────────────
+async function loadKeys() {
+  const tbody = document.getElementById('keys-tbody');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="5"><span class="spinner"></span></td></tr>';
+  try {
+    const data = await api('GET', '/api/keys');
+    keysData = data.keys || [];
+    renderKeys();
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state"><div class="empty-state-icon">⚠</div>${err.message}</td></tr>`;
+  }
+}
+
+function renderKeys() {
+  const tbody = document.getElementById('keys-tbody');
+  const isAdmin = currentUser?.role === 'admin';
+  if (!keysData.length) {
+    tbody.innerHTML = `<tr><td colspan="${isAdmin ? 5 : 4}" class="empty-state"><div class="empty-state-icon">🔑</div>No API keys yet${isAdmin ? ' — generate one above.' : '.'}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = keysData.map(k => renderKeyRow(k, isAdmin)).join('');
+}
+
+function renderKeyRow(k, isAdmin) {
+  const statusBadge = k.enabled
+    ? '<span class="badge badge-enabled">Enabled</span>'
+    : '<span class="badge badge-disabled">Disabled</span>';
+  const note = k.note
+    ? `<span class="td-note-text">${esc(k.note)}</span>`
+    : `<span class="td-note-text empty">—</span>`;
+  const noteCell = isAdmin
+    ? `<div class="td-note-wrap" id="note-wrap-${esc(k.key)}">${note}<button class="btn-icon" title="Edit note" onclick="editNote('${esc(k.key)}')">✏</button></div>`
+    : `<div class="td-note-wrap">${note}</div>`;
+  const actions = isAdmin ? `
+    <div class="td-actions">
+      <button class="btn btn-${k.enabled ? 'warn' : 'accent'}" style="font-size:12px;padding:5px 10px"
+        onclick="toggleKey('${esc(k.key)}', ${!k.enabled})">${k.enabled ? 'Disable' : 'Enable'}</button>
+      <button class="btn-icon danger" title="Delete key" onclick="deleteKey('${esc(k.key)}')">🗑</button>
+    </div>` : '';
+  return `<tr id="key-row-${esc(k.key)}">
+    <td class="td-key">${esc(k.key)}</td>
+    <td>${noteCell}</td>
+    <td>${statusBadge}</td>
+    <td class="td-date">${fmtDate(k.created_at)}</td>
+    ${isAdmin ? `<td>${actions}</td>` : ''}
+  </tr>`;
+}
+
+function toggleCreateKeyForm() {
+  const form = document.getElementById('create-key-form');
+  form.classList.toggle('hidden');
+  if (!form.classList.contains('hidden')) {
+    document.getElementById('new-key-note').focus();
+    document.getElementById('create-key-error').classList.add('hidden');
+  }
+}
+
+async function createKey() {
+  const note = document.getElementById('new-key-note').value.trim();
+  const errEl = document.getElementById('create-key-error');
+  errEl.classList.add('hidden');
+  try {
+    const data = await api('POST', '/api/keys', { note });
+    document.getElementById('new-key-note').value = '';
+    toggleCreateKeyForm();
+    keysData.unshift(data);
+    renderKeys();
+    showKeyModal(data.key, data.note);
+  } catch (err) {
+    errEl.className = 'msg msg-error';
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+function editNote(key) {
+  const wrap = document.getElementById(`note-wrap-${key}`);
+  const keyObj = keysData.find(k => k.key === key);
+  const current = keyObj?.note || '';
+  wrap.innerHTML = `
+    <div class="inline-edit-wrap">
+      <input class="inline-edit-input" id="note-input-${esc(key)}" value="${esc(current)}" maxlength="200" placeholder="Note…">
+      <button class="btn-icon" title="Save" onclick="saveNote('${esc(key)}')">✓</button>
+      <button class="btn-icon" title="Cancel" onclick="loadKeys()">✕</button>
+    </div>`;
+  document.getElementById(`note-input-${key}`).focus();
+  document.getElementById(`note-input-${key}`).addEventListener('keydown', e => {
+    if (e.key === 'Enter') saveNote(key);
+    if (e.key === 'Escape') loadKeys();
+  });
+}
+
+async function saveNote(key) {
+  const note = document.getElementById(`note-input-${key}`)?.value?.trim() ?? '';
+  try {
+    const updated = await api('PATCH', `/api/keys/${key}`, { note });
+    const idx = keysData.findIndex(k => k.key === key);
+    if (idx !== -1) keysData[idx] = { ...keysData[idx], note: updated.note };
+    renderKeys();
+  } catch (err) {
+    alert('Error saving note: ' + err.message);
+  }
+}
+
+async function toggleKey(key, enabled) {
+  try {
+    const updated = await api('PATCH', `/api/keys/${key}`, { enabled });
+    const idx = keysData.findIndex(k => k.key === key);
+    if (idx !== -1) keysData[idx] = { ...keysData[idx], enabled: updated.enabled };
+    renderKeys();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+async function deleteKey(key) {
+  if (!confirm(`Delete key ${key}? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/api/keys/${key}`);
+    keysData = keysData.filter(k => k.key !== key);
+    renderKeys();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+// ── Key modal ──────────────────────────────────────────
+function showKeyModal(key, note) {
+  document.getElementById('modal-key-value').textContent = key;
+  document.getElementById('modal-key-note').textContent = note ? `Note: ${note}` : '';
+  document.getElementById('modal-copy-msg').classList.add('hidden');
+  document.getElementById('key-modal').classList.remove('hidden');
+}
+
+function closeKeyModal() {
+  document.getElementById('key-modal').classList.add('hidden');
+}
+
+async function copyKey() {
+  const key = document.getElementById('modal-key-value').textContent;
+  try {
+    await navigator.clipboard.writeText(key);
+    const msg = document.getElementById('modal-copy-msg');
+    msg.classList.remove('hidden');
+    setTimeout(() => msg.classList.add('hidden'), 2000);
+  } catch { alert('Copy failed — please copy manually: ' + key); }
+}
+
+document.getElementById('key-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('key-modal')) closeKeyModal();
+});
+
+// ── Users ──────────────────────────────────────────────
+async function loadUsers() {
+  const tbody = document.getElementById('users-tbody');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="5"><span class="spinner"></span></td></tr>';
+  try {
+    const data = await api('GET', '/api/admin/users');
+    usersData = data.users || [];
+    renderUsers();
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state"><div class="empty-state-icon">⚠</div>${err.message}</td></tr>`;
+  }
+}
+
+function renderUsers() {
+  const tbody = document.getElementById('users-tbody');
+  if (!usersData.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state"><div class="empty-state-icon">👤</div>No users found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = usersData.map(u => renderUserRow(u)).join('');
+}
+
+function renderUserRow(u) {
+  const isSelf = currentUser && u.username === currentUser.username;
+  const statusBadge = u.enabled
+    ? '<span class="badge badge-enabled">Active</span>'
+    : '<span class="badge badge-disabled">Disabled</span>';
+  const rolePill = `<span class="role-pill ${u.role}">${u.role}</span>`;
+  const selfTag = isSelf ? ' <span style="font-size:11px;color:var(--text-muted)">(you)</span>' : '';
+  const deleteBtn = isSelf
+    ? `<button class="btn-icon danger" disabled title="Cannot delete your own account" style="opacity:0.25">🗑</button>`
+    : `<button class="btn-icon danger" title="Delete user" onclick="deleteUser(${u.id}, '${esc(u.username)}')">🗑</button>`;
+
+  return `<tr id="user-row-${u.id}">
+    <td><span style="font-weight:500">${esc(u.username)}</span>${selfTag}</td>
+    <td>${rolePill}</td>
+    <td>${statusBadge}</td>
+    <td class="td-date">${fmtDate(u.created_at)}</td>
+    <td>
+      <div class="td-actions" style="flex-wrap:wrap;gap:6px">
+        <button class="btn btn-${u.enabled ? 'warn' : 'accent'}" style="font-size:12px;padding:5px 10px"
+          onclick="toggleUser(${u.id}, ${!u.enabled})">${u.enabled ? 'Disable' : 'Enable'}</button>
+        <button class="btn btn-secondary" style="font-size:12px;padding:5px 10px"
+          onclick="showResetPw(${u.id})">Reset PW</button>
+        ${deleteBtn}
+      </div>
+      <div id="reset-pw-${u.id}" class="hidden">
+        <div class="inline-pw-wrap">
+          <input class="inline-pw-input" id="pw-input-${u.id}" type="password" placeholder="New password">
+          <button class="btn-icon" title="Save" onclick="saveResetPw(${u.id})">✓</button>
+          <button class="btn-icon" title="Cancel" onclick="document.getElementById('reset-pw-${u.id}').classList.add('hidden')">✕</button>
+        </div>
+        <div id="pw-error-${u.id}" class="hidden row-error"></div>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function toggleCreateUserForm() {
+  const form = document.getElementById('create-user-form');
+  form.classList.toggle('hidden');
+  if (!form.classList.contains('hidden')) {
+    document.getElementById('new-user-username').focus();
+    document.getElementById('create-user-error').classList.add('hidden');
+  }
+}
+
+async function createUser() {
+  const username = document.getElementById('new-user-username').value.trim();
+  const password = document.getElementById('new-user-password').value;
+  const role = document.getElementById('new-user-role').value;
+  const errEl = document.getElementById('create-user-error');
+  errEl.classList.add('hidden');
+  if (!username || !password) {
+    errEl.className = 'msg msg-error'; errEl.textContent = 'Username and password are required.'; errEl.classList.remove('hidden'); return;
+  }
+  try {
+    const user = await api('POST', '/api/admin/users', { username, password, role });
+    document.getElementById('new-user-username').value = '';
+    document.getElementById('new-user-password').value = '';
+    toggleCreateUserForm();
+    usersData.push(user);
+    renderUsers();
+  } catch (err) {
+    errEl.className = 'msg msg-error'; errEl.textContent = err.message; errEl.classList.remove('hidden');
+  }
+}
+
+async function toggleUser(id, enabled) {
+  try {
+    const updated = await api('PATCH', `/api/admin/users/${id}`, { enabled });
+    const idx = usersData.findIndex(u => u.id === id);
+    if (idx !== -1) usersData[idx] = { ...usersData[idx], enabled: updated.enabled };
+    renderUsers();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+function showResetPw(id) {
+  const wrap = document.getElementById(`reset-pw-${id}`);
+  wrap.classList.toggle('hidden');
+  if (!wrap.classList.contains('hidden')) {
+    document.getElementById(`pw-input-${id}`).focus();
+    document.getElementById(`pw-input-${id}`).addEventListener('keydown', e => {
+      if (e.key === 'Enter') saveResetPw(id);
+      if (e.key === 'Escape') wrap.classList.add('hidden');
+    });
+  }
+}
+
+async function saveResetPw(id) {
+  const password = document.getElementById(`pw-input-${id}`)?.value;
+  const errEl = document.getElementById(`pw-error-${id}`);
+  if (!password) { errEl.textContent = 'Password cannot be empty.'; errEl.classList.remove('hidden'); return; }
+  try {
+    await api('PATCH', `/api/admin/users/${id}`, { password });
+    document.getElementById(`reset-pw-${id}`).classList.add('hidden');
+    document.getElementById(`pw-input-${id}`).value = '';
+  } catch (err) {
+    errEl.textContent = err.message; errEl.classList.remove('hidden');
+  }
+}
+
+async function deleteUser(id, username) {
+  if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/api/admin/users/${id}`);
+    usersData = usersData.filter(u => u.id !== id);
+    renderUsers();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+// ── Utilities ──────────────────────────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// ── Init ───────────────────────────────────────────────
+(function init() {
+  const token = getToken();
+  if (token) {
+    const payload = decodeJwt(token);
+    if (payload && payload.exp * 1000 > Date.now()) {
+      showDashboard();
+      return;
+    }
+    clearSession();
+  }
+  showLogin();
+})();
+</script>
+</body>
+</html>

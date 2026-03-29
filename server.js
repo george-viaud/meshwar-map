@@ -4,6 +4,9 @@ const { Pool } = require('pg');
 const Redis = require('ioredis');
 const ngeohash = require('ngeohash');
 const path = require('path');
+const fs = require('fs');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -110,6 +113,43 @@ function aggregateSamples(samples) {
   }
 
   return coverage;
+}
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+
+function jwtSecret() {
+  return process.env.JWT_SECRET || process.env.ADMIN_TOKEN;
+}
+
+function requireAuth(req, res, roles = []) {
+  const auth = req.headers['authorization'];
+  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) { res.status(401).json({ error: 'Login required' }); return null; }
+  try {
+    const payload = jwt.verify(token, jwtSecret());
+    if (roles.length && !roles.includes(payload.role)) {
+      res.status(403).json({ error: 'Insufficient permissions' }); return null;
+    }
+    return payload;
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' }); return null;
+  }
+}
+
+async function checkApiKey(req, res) {
+  const auth = req.headers['authorization'];
+  const key = auth?.startsWith('Bearer ') ? auth.slice(7).toUpperCase() : null;
+  if (!key) { res.status(401).json({ error: 'API key required' }); return false; }
+  const result = await db.query('SELECT enabled FROM api_keys WHERE key = $1', [key]);
+  if (!result.rows.length || !result.rows[0].enabled) {
+    res.status(401).json({ error: 'Invalid or disabled API key' }); return false;
+  }
+  return true;
+}
+
+function generateKey() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
 async function getGlobalVersion() {
@@ -239,6 +279,8 @@ app.get('/api/samples', async (req, res) => {
 
 app.post('/api/samples', async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
+
+  if (!await checkApiKey(req, res)) return;
 
   try {
     const { samples } = req.body;
@@ -415,9 +457,240 @@ app.delete('/api/samples', async (req, res) => {
   }
 });
 
+// ── POST /api/auth/login ──────────────────────────────────────────────────────
+
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password required' });
+  }
+  try {
+    const result = await db.query(
+      'SELECT id, username, password_hash, role, enabled FROM admin_users WHERE username = $1',
+      [username]
+    );
+    const user = result.rows[0];
+    if (!user || !user.enabled) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const token = jwt.sign(
+      { userId: user.id, username: user.username, role: user.role },
+      jwtSecret(),
+      { expiresIn: '24h' }
+    );
+    res.json({ token, username: user.username, role: user.role });
+  } catch (err) {
+    console.error('POST /api/auth/login:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/keys ─────────────────────────────────────────────────────────────
+
+app.get('/api/keys', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  try {
+    const result = await db.query('SELECT key, note, enabled, created_at FROM api_keys ORDER BY created_at DESC');
+    res.json({ keys: result.rows });
+  } catch (err) {
+    console.error('GET /api/keys:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/keys ────────────────────────────────────────────────────────────
+
+app.post('/api/keys', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  const note = req.body?.note || '';
+  try {
+    let key, attempts = 0;
+    do {
+      key = generateKey();
+      attempts++;
+    } while (attempts < 10 && (await db.query('SELECT 1 FROM api_keys WHERE key = $1', [key])).rows.length);
+
+    await db.query('INSERT INTO api_keys (key, note) VALUES ($1, $2)', [key, note]);
+    res.json({ key, note, enabled: true });
+  } catch (err) {
+    console.error('POST /api/keys:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /api/keys/:key ──────────────────────────────────────────────────────
+
+app.patch('/api/keys/:key', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  const { note, enabled } = req.body || {};
+  const fields = [], values = [];
+  if (note !== undefined) { fields.push(`note = $${fields.length + 1}`); values.push(note); }
+  if (enabled !== undefined) { fields.push(`enabled = $${fields.length + 1}`); values.push(enabled); }
+  if (!fields.length) return res.status(400).json({ error: 'nothing to update' });
+  values.push(req.params.key.toUpperCase());
+  try {
+    const result = await db.query(
+      `UPDATE api_keys SET ${fields.join(', ')} WHERE key = $${values.length} RETURNING key, note, enabled, created_at`,
+      values
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Key not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('PATCH /api/keys:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /api/keys/:key ─────────────────────────────────────────────────────
+
+app.delete('/api/keys/:key', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  try {
+    const result = await db.query('DELETE FROM api_keys WHERE key = $1', [req.params.key.toUpperCase()]);
+    if (!result.rowCount) return res.status(404).json({ error: 'Key not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/keys:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/admin/users ──────────────────────────────────────────────────────
+
+app.get('/api/admin/users', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  try {
+    const result = await db.query(
+      'SELECT id, username, role, enabled, created_at FROM admin_users ORDER BY created_at ASC'
+    );
+    res.json({ users: result.rows });
+  } catch (err) {
+    console.error('GET /api/admin/users:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/admin/users ─────────────────────────────────────────────────────
+
+app.post('/api/admin/users', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  const { username, password, role } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'username and password required' });
+  if (!['admin', 'viewer'].includes(role)) return res.status(400).json({ error: 'role must be admin or viewer' });
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const result = await db.query(
+      'INSERT INTO admin_users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role, enabled, created_at',
+      [username, hash, role]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Username already exists' });
+    console.error('POST /api/admin/users:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /api/admin/users/:id ────────────────────────────────────────────────
+
+app.patch('/api/admin/users/:id', async (req, res) => {
+  const caller = requireAuth(req, res, ['admin']);
+  if (!caller) return;
+  const { password, role, enabled } = req.body || {};
+  const id = parseInt(req.params.id);
+  const fields = [], values = [];
+  if (password !== undefined) {
+    fields.push(`password_hash = $${fields.length + 1}`);
+    values.push(await bcrypt.hash(password, 10));
+  }
+  if (role !== undefined) {
+    if (!['admin', 'viewer'].includes(role)) return res.status(400).json({ error: 'role must be admin or viewer' });
+    fields.push(`role = $${fields.length + 1}`);
+    values.push(role);
+  }
+  if (enabled !== undefined) {
+    if (caller.userId === id && enabled === false) {
+      return res.status(400).json({ error: 'Cannot disable your own account' });
+    }
+    fields.push(`enabled = $${fields.length + 1}`);
+    values.push(enabled);
+  }
+  if (!fields.length) return res.status(400).json({ error: 'nothing to update' });
+  values.push(id);
+  try {
+    const result = await db.query(
+      `UPDATE admin_users SET ${fields.join(', ')} WHERE id = $${values.length} RETURNING id, username, role, enabled, created_at`,
+      values
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('PATCH /api/admin/users:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /api/admin/users/:id ───────────────────────────────────────────────
+
+app.delete('/api/admin/users/:id', async (req, res) => {
+  const caller = requireAuth(req, res, ['admin']);
+  if (!caller) return;
+  const id = parseInt(req.params.id);
+  if (caller.userId === id) return res.status(400).json({ error: 'Cannot delete your own account' });
+  try {
+    const result = await db.query('DELETE FROM admin_users WHERE id = $1', [id]);
+    if (!result.rowCount) return res.status(404).json({ error: 'User not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/admin/users:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Static frontend ───────────────────────────────────────────────────────────
 
 app.use(express.static(path.join(__dirname)));
+
+// ── Migrations ────────────────────────────────────────────────────────────────
+
+async function runMigrations() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      name       VARCHAR(255) PRIMARY KEY,
+      applied_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  const migrationsDir = path.join(__dirname, 'db', 'migrations');
+  if (!fs.existsSync(migrationsDir)) return;
+
+  const files = fs.readdirSync(migrationsDir)
+    .filter(f => f.endsWith('.sql'))
+    .sort();
+
+  const applied = new Set(
+    (await db.query('SELECT name FROM schema_migrations')).rows.map(r => r.name)
+  );
+
+  for (const file of files) {
+    if (applied.has(file)) continue;
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+    await db.query('BEGIN');
+    try {
+      await db.query(sql);
+      await db.query('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
+      await db.query('COMMIT');
+      console.log(`Migration applied: ${file}`);
+    } catch (err) {
+      await db.query('ROLLBACK');
+      throw new Error(`Migration failed (${file}): ${err.message}`);
+    }
+  }
+}
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
@@ -439,6 +712,20 @@ async function start() {
       console.log(`Waiting for PostgreSQL... (${retries} retries left)`);
       await new Promise(r => setTimeout(r, 2000));
     }
+  }
+
+  // Run pending database migrations
+  await runMigrations();
+
+  // Bootstrap: create default admin user if none exist
+  const adminCount = await db.query('SELECT COUNT(*) FROM admin_users');
+  if (parseInt(adminCount.rows[0].count) === 0) {
+    const hash = await bcrypt.hash(process.env.ADMIN_TOKEN, 10);
+    await db.query(
+      `INSERT INTO admin_users (username, password_hash, role) VALUES ('admin', $1, 'admin')`,
+      [hash]
+    );
+    console.log('Bootstrap: no admin users found — created user "admin" with password set to ADMIN_TOKEN');
   }
 
   const PORT = parseInt(process.env.PORT || '3000');

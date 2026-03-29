@@ -22,8 +22,8 @@ All environment variables must be set before running — see Deployment below.
 The app runs on **apollo** at `wardrive.inwmesh.org`, deployed via Docker Compose.
 
 ```bash
-# After pushing changes — rebuild and redeploy on apollo
-ssh apollo "cd ~/docker/meshwar-map && git pull && source /etc/environment && docker compose up -d --build app"
+# After pushing changes — deploy on apollo (snapshots DB first, then rebuilds)
+ssh apollo "cd ~/docker/meshwar-map && ./deploy.sh"
 
 # View logs
 ssh apollo "docker compose -f ~/docker/meshwar-map/docker-compose.yml logs -f app"
@@ -31,6 +31,21 @@ ssh apollo "docker compose -f ~/docker/meshwar-map/docker-compose.yml logs -f ap
 # Wipe all coverage data
 curl -X DELETE https://wardrive.inwmesh.org/api/samples \
   -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+`deploy.sh` automatically:
+1. Snapshots the database to `backups/wardrive_YYYYMMDD_HHMMSS.sql.gz` (aborts if this fails)
+2. Rotates old backups, keeping the last 10
+3. Pulls latest code (`git pull`)
+4. Rebuilds and restarts the app container
+5. Tails logs to confirm startup
+
+**To restore from a backup:**
+```bash
+ssh apollo
+gunzip -c ~/docker/meshwar-map/backups/wardrive_YYYYMMDD_HHMMSS.sql.gz \
+  | docker compose -f ~/docker/meshwar-map/docker-compose.yml exec -T postgres \
+    psql -U wardrive wardrive
 ```
 
 Secrets (`PG_PASSWORD`, `ADMIN_TOKEN`) are set in `/etc/environment` on apollo — not in any file in this repo.
