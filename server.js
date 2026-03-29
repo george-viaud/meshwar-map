@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const app = express();
+app.set('trust proxy', 1); // Trust X-Forwarded-Proto from reverse proxy
 app.use(express.json({ limit: '10mb' }));
 
 // ── Database ──────────────────────────────────────────────────────────────────
