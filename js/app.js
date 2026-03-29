@@ -107,6 +107,11 @@ let timelapseMaxDate = null;
 
 // Measure tool state
 let measureActive = false;
+
+// My Data filter state
+let myDataFilterActive = false;
+let myDataHashes = null;        // Set of precision-7 geohashes from the server
+let myDataPrefixSets = {};      // Precomputed sets per precision level (4–7)
 let measurePoints = [];
 let measureUnit = 'km';
 let measureMarkers = [];
@@ -205,6 +210,13 @@ function renderVisibleCoverage() {
 
         // Expiry filter: hide cells older than 90 days
         if (ageInDays(cell.lastUpdate) > EXPIRY_DAYS) return;
+
+        // My Data filter — use precision-appropriate set
+        if (myDataFilterActive && myDataHashes) {
+            const precision = hash.length;
+            const set = myDataPrefixSets[precision];
+            if (set && !set.has(hash)) return;
+        }
 
         const bounds = geohashToBounds(hash);
         const cellBounds = L.latLngBounds(bounds);
@@ -1000,6 +1012,83 @@ function showRepeaterInfo(name, rssi, snr, lastSeen) {
         e.stopPropagation();
     }, { passive: false });
 })();
+
+// ---------------------
+// My Data filter
+// ---------------------
+function onMyDataToggle() {
+    const checked = document.getElementById('toggle-mydata').checked;
+    const inputRow = document.getElementById('mydata-input-row');
+    const activeLabel = document.getElementById('mydata-active-label');
+    const errorEl = document.getElementById('mydata-error');
+
+    errorEl.style.display = 'none';
+
+    if (!checked) {
+        myDataFilterActive = false;
+        myDataHashes = null;
+        myDataPrefixSets = {};
+        inputRow.style.display = 'none';
+        activeLabel.style.display = 'none';
+        renderVisibleCoverage();
+        return;
+    }
+
+    // If we already have hashes loaded, re-enable immediately
+    if (myDataHashes) {
+        myDataFilterActive = true;
+        inputRow.style.display = 'none';
+        activeLabel.style.display = '';
+        renderVisibleCoverage();
+        return;
+    }
+
+    inputRow.style.display = '';
+    activeLabel.style.display = 'none';
+}
+
+async function applyMyDataFilter() {
+    const raw = document.getElementById('mydata-key-input').value.trim();
+    const errorEl = document.getElementById('mydata-error');
+    const activeLabel = document.getElementById('mydata-active-label');
+
+    errorEl.style.display = 'none';
+
+    // Extract the key from a full URL or use as-is
+    let key = raw;
+    const match = raw.match(/\/api\/samples\/([A-Z0-9]{8})/i);
+    if (match) key = match[1];
+    key = key.toUpperCase();
+
+    if (!key || key.length < 4) {
+        errorEl.textContent = 'Paste your full submission URL or just the token (e.g. A1B2C3D4)';
+        errorEl.style.display = '';
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/contributions/${encodeURIComponent(key)}`);
+        const data = await res.json();
+        if (!res.ok) {
+            errorEl.textContent = data.error || 'Invalid token';
+            errorEl.style.display = '';
+            return;
+        }
+        myDataHashes = new Set(data.geohashes);
+        // Precompute prefix sets for each display precision level
+        myDataPrefixSets = {};
+        for (let p = 4; p <= 7; p++) {
+            myDataPrefixSets[p] = new Set(data.geohashes.map(h => h.substring(0, p)));
+        }
+        myDataFilterActive = true;
+        document.getElementById('mydata-input-row').style.display = 'none';
+        activeLabel.style.display = '';
+        renderVisibleCoverage();
+    } catch {
+        errorEl.textContent = 'Network error — try again';
+        errorEl.style.display = '';
+    }
+}
 
 // ---------------------
 // Initialize

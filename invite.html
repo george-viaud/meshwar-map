@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeshCore Wardrive — Join</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #121212;
+    --surface: rgba(30,30,30,0.97);
+    --border: #2a2a2a;
+    --border-light: #333;
+    --accent: #00e676;
+    --accent-dim: rgba(0,230,118,0.12);
+    --accent-hover: #00ff85;
+    --danger: #f44336;
+    --danger-dim: rgba(244,67,54,0.12);
+    --text: #ffffff;
+    --text-secondary: #aaa;
+    --text-muted: #666;
+    --mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  }
+
+  html, body {
+    min-height: 100%;
+    background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0,230,118,0.06) 0%, transparent 60%), var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px 16px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    padding: 36px 32px;
+    width: 100%;
+    max-width: 460px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+
+  .logo-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+    flex-shrink: 0;
+  }
+
+  .logo-text { font-size: 15px; font-weight: 600; }
+  .logo-sub { font-size: 11px; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+  h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+  }
+
+  .field { margin-bottom: 14px; }
+
+  .field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+
+  .field input {
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 9px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .field input:focus {
+    border-color: var(--accent);
+    background: rgba(0,230,118,0.04);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 11px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-top: 6px;
+  }
+
+  .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:active { transform: scale(0.99); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-secondary);
+    border-color: var(--border-light);
+    margin-top: 10px;
+    font-weight: 500;
+    font-size: 13px;
+    text-decoration: none;
+  }
+  .btn-secondary:hover { border-color: #555; color: var(--text); }
+
+  .msg {
+    font-size: 13px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    margin-top: 14px;
+  }
+  .msg-error { background: var(--danger-dim); color: #ff6b6b; border: 1px solid rgba(244,67,54,0.2); }
+
+  /* ── Token reveal ─────────────────────────────────────── */
+  .token-reveal { display: none; }
+
+  .url-box {
+    background: rgba(0,0,0,0.35);
+    border: 1px solid rgba(0,230,118,0.3);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 16px 0;
+    position: relative;
+  }
+
+  .url-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+
+  .url-value {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+    word-break: break-all;
+    line-height: 1.6;
+  }
+
+  .copy-btn {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 7px 12px;
+    background: var(--accent-dim);
+    border: 1px solid rgba(0,230,118,0.25);
+    border-radius: 5px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s;
+    text-align: center;
+  }
+  .copy-btn:hover { background: rgba(0,230,118,0.2); }
+
+  .save-warning {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: rgba(255,152,0,0.08);
+    border: 1px solid rgba(255,152,0,0.2);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 20px;
+    font-size: 12px;
+    color: #ffb74d;
+    line-height: 1.5;
+  }
+
+  .save-warning-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+
+  /* ── Android instructions ─────────────────────────────── */
+  .instructions {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+
+  .instructions-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+  }
+
+  .step {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+
+  .step:last-child { margin-bottom: 0; }
+
+  .step-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent-dim);
+    border: 1px solid rgba(0,230,118,0.25);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .step-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .step-text strong { color: var(--text); }
+
+  /* ── Loading / invalid states ─────────────────────────── */
+  .state-loading, .state-invalid {
+    text-align: center;
+    padding: 20px 0;
+    color: var(--text-secondary);
+  }
+
+  .state-loading .spinner {
+    width: 28px; height: 28px;
+    border: 2px solid var(--border-light);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 14px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .state-invalid h3 { font-size: 17px; margin-bottom: 6px; color: var(--text); }
+  .state-invalid p { font-size: 13px; }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 20px 0;
+  }
+
+  .signin-link {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .signin-link a { color: var(--accent); text-decoration: none; }
+  .signin-link a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="card">
+    <div class="logo">
+      <div class="logo-dot"></div>
+      <div>
+        <div class="logo-text">MeshCore Wardrive</div>
+        <div class="logo-sub">inwmesh.org</div>
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    <div id="state-loading" class="state-loading">
+      <div class="spinner"></div>
+      Checking invite link...
+    </div>
+
+    <!-- Invalid state -->
+    <div id="state-invalid" class="state-invalid hidden">
+      <h3>Invite Link Invalid</h3>
+      <p>This invite link is no longer valid or has been fully used.</p>
+      <div class="divider"></div>
+      <div class="signin-link">Already have an account? <a href="/admin">Sign in</a></div>
+    </div>
+
+    <!-- Registration form -->
+    <div id="state-register" class="hidden">
+      <h2>Create Account</h2>
+      <p class="subtitle" id="invite-note-text">You've been invited to join MeshCore Wardrive.</p>
+
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" placeholder="Choose a username" autocomplete="username" autocapitalize="none">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Choose a password" autocomplete="new-password">
+      </div>
+      <div class="field">
+        <label for="password-confirm">Confirm Password</label>
+        <input type="password" id="password-confirm" placeholder="Repeat password" autocomplete="new-password">
+      </div>
+
+      <button class="btn btn-primary" id="register-btn" onclick="submitRegistration()">Create Account</button>
+      <div id="register-error" class="msg msg-error hidden"></div>
+
+      <div class="divider"></div>
+      <div class="signin-link">Already have an account? <a href="/admin">Sign in</a></div>
+    </div>
+
+    <!-- Token reveal -->
+    <div id="state-token" class="token-reveal">
+      <h2>You're In!</h2>
+      <p class="subtitle">Copy your submission URL and paste it into the MeshCore Wardrive app.</p>
+
+      <div class="url-box">
+        <div class="url-label">Your Submission URL</div>
+        <div class="url-value" id="token-url"></div>
+        <button class="copy-btn" id="copy-btn" onclick="copyUrl()">Copy URL</button>
+      </div>
+
+      <div class="save-warning">
+        <span class="save-warning-icon">&#9888;</span>
+        <span>Save this URL now — you can always retrieve it later by signing in to your account.</span>
+      </div>
+
+      <div class="instructions">
+        <div class="instructions-title">Android App Setup</div>
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">Open <strong>MeshCore Wardrive</strong> &rarr; tap the menu (&#9776;) &rarr; <strong>Settings</strong></div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">Under <strong>Online Map</strong> &rarr; tap <strong>Configure API</strong></div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">Paste your URL into the <strong>API URL</strong> field &rarr; tap <strong>Save</strong></div>
+        </div>
+      </div>
+
+      <a class="btn btn-secondary" href="/admin">Sign in to your account</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  const code = window.location.pathname.split('/invite/')[1];
+  let submissionUrl = '';
+
+  function show(stateId) {
+    ['state-loading', 'state-invalid', 'state-register', 'state-token'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = id === stateId ? '' : 'none';
+    });
+  }
+
+  async function init() {
+    if (!code) { show('state-invalid'); return; }
+    try {
+      const res = await fetch(`/api/invite/${encodeURIComponent(code)}`);
+      const data = await res.json();
+      if (!data.valid) { show('state-invalid'); return; }
+      if (data.note) {
+        document.getElementById('invite-note-text').textContent = `You've been invited: ${data.note}`;
+      }
+      show('state-register');
+    } catch {
+      show('state-invalid');
+    }
+  }
+
+  async function submitRegistration() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const confirm  = document.getElementById('password-confirm').value;
+    const errEl    = document.getElementById('register-error');
+    const btn      = document.getElementById('register-btn');
+
+    errEl.classList.add('hidden');
+
+    if (!username) { showErr('Username is required'); return; }
+    if (!password) { showErr('Password is required'); return; }
+    if (password !== confirm) { showErr('Passwords do not match'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Creating account...';
+
+    try {
+      const res = await fetch(`/api/invite/${encodeURIComponent(code)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showErr(data.error || 'Registration failed'); btn.disabled = false; btn.textContent = 'Create Account'; return; }
+      submissionUrl = data.url;
+      document.getElementById('token-url').textContent = data.url;
+      show('state-token');
+    } catch {
+      showErr('Network error — please try again');
+      btn.disabled = false;
+      btn.textContent = 'Create Account';
+    }
+  }
+
+  function showErr(msg) {
+    const el = document.getElementById('register-error');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+
+  async function copyUrl() {
+    const btn = document.getElementById('copy-btn');
+    try {
+      await navigator.clipboard.writeText(submissionUrl);
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy URL', 2000);
+    } catch {
+      btn.textContent = 'Copy failed';
+    }
+  }
+
+  // Hide all states on load, then init
+  document.querySelectorAll('#state-invalid,#state-register,#state-token').forEach(el => el.style.display = 'none');
+  init();
+</script>
+</body>
+</html>

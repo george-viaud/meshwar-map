@@ -83,6 +83,22 @@
             <button class="timelapse-btn" id="timelapse-toggle-btn" onclick="toggleTimelapse()" style="width: 100%;">⏱ Time-lapse</button>
         </div>
 
+        <div class="layer-toggles" id="mydata-section">
+            <div style="font-size: 12px; font-weight: 600; margin-bottom: 6px; color: #aaa;">My Data</div>
+            <div class="toggle-item">
+                <input type="checkbox" id="toggle-mydata" onchange="onMyDataToggle()">
+                <label for="toggle-mydata">Show only my contributions</label>
+            </div>
+            <div id="mydata-input-row" style="display:none; margin-top: 8px;">
+                <input type="text" id="mydata-key-input" placeholder="Paste your submission URL or token"
+                    style="width:100%; background:rgba(255,255,255,0.05); border:1px solid #333; border-radius:5px; color:#fff; padding:7px 10px; font-size:12px; font-family:inherit; outline:none;"
+                    onkeydown="if(event.key==='Enter') applyMyDataFilter()">
+                <button onclick="applyMyDataFilter()" style="margin-top:6px; width:100%; padding:6px; background:rgba(0,230,118,0.12); border:1px solid rgba(0,230,118,0.25); border-radius:5px; color:#00e676; font-size:12px; font-family:inherit; cursor:pointer;">Apply</button>
+            </div>
+            <div id="mydata-active-label" style="display:none; font-size:11px; color:#00e676; margin-top:6px;">&#10003; Showing your data only</div>
+            <div id="mydata-error" style="display:none; font-size:11px; color:#f44336; margin-top:6px;"></div>
+        </div>
+
         <div class="legend">
             <div class="legend-title">Coverage Quality</div>
             <div class="legend-item">

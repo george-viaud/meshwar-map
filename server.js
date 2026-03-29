@@ -136,20 +136,14 @@ function requireAuth(req, res, roles = []) {
   }
 }
 
-async function checkApiKey(req, res) {
-  const auth = req.headers['authorization'];
-  const key = auth?.startsWith('Bearer ') ? auth.slice(7).toUpperCase() : null;
-  if (!key) { res.status(401).json({ error: 'API key required' }); return false; }
-  const result = await db.query('SELECT enabled FROM api_keys WHERE key = $1', [key]);
-  if (!result.rows.length || !result.rows[0].enabled) {
-    res.status(401).json({ error: 'Invalid or disabled API key' }); return false;
-  }
-  return true;
-}
-
 function generateKey() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+function generateInviteCode() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from({ length: 24 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
 async function getGlobalVersion() {
@@ -173,6 +167,7 @@ const CORS_HEADERS = {
 };
 
 app.options('/api/samples', (req, res) => res.set(CORS_HEADERS).end());
+app.options('/api/samples/:key', (req, res) => res.set(CORS_HEADERS).end());
 
 // ── GET /api/samples ──────────────────────────────────────────────────────────
 
@@ -275,12 +270,33 @@ app.get('/api/samples', async (req, res) => {
   }
 });
 
-// ── POST /api/samples ─────────────────────────────────────────────────────────
+// ── POST /api/samples (legacy — reject with helpful message) ──────────────────
 
-app.post('/api/samples', async (req, res) => {
+app.post('/api/samples', (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.status(401).json({
+    error: 'This endpoint requires a contributor token. Use POST /api/samples/YOUR_TOKEN instead.',
+  });
+});
+
+// ── POST /api/samples/:key ────────────────────────────────────────────────────
+
+app.post('/api/samples/:key', async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
 
-  if (!await checkApiKey(req, res)) return;
+  const key = req.params.key?.toUpperCase();
+  const authResult = await db.query(
+    `SELECT ct.user_id, ct.active, u.enabled
+     FROM contributor_tokens ct
+     JOIN admin_users u ON ct.user_id = u.id
+     WHERE ct.key = $1`,
+    [key]
+  );
+  const authRow = authResult.rows[0];
+  if (!authRow || !authRow.active || !authRow.enabled) {
+    return res.status(401).json({ error: 'Invalid or disabled token' });
+  }
+  const userId = authRow.user_id;
 
   try {
     const { samples } = req.body;
@@ -411,6 +427,17 @@ app.post('/api/samples', async (req, res) => {
     // Mark samples as seen
     await Promise.all(deduped.map(s => redis.setex(`seen:${s.__id}`, DEDUP_TTL, '1')));
 
+    // Record which geohashes this user contributed to
+    const affectedHashes = Object.keys(newCoverage);
+    if (affectedHashes.length) {
+      const ph = affectedHashes.map((_, i) => `($1, $${i + 2}, NOW())`).join(',');
+      await db.query(
+        `INSERT INTO user_contributions (user_id, geohash, updated_at) VALUES ${ph}
+         ON CONFLICT (user_id, geohash) DO UPDATE SET updated_at = NOW()`,
+        [userId, ...affectedHashes]
+      );
+    }
+
     const totals = await db.query('SELECT COALESCE(SUM(cells),0) AS total FROM shard_index');
     const totalCells = parseInt(totals.rows[0].total);
 
@@ -426,7 +453,7 @@ app.post('/api/samples', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('POST /api/samples:', err.message);
+    console.error('POST /api/samples/:key:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -489,72 +516,310 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// ── GET /api/keys ─────────────────────────────────────────────────────────────
+// ── GET /api/invite/:code — validate invite ───────────────────────────────────
 
-app.get('/api/keys', async (req, res) => {
-  if (!requireAuth(req, res)) return;
+app.get('/api/invite/:code', async (req, res) => {
   try {
-    const result = await db.query('SELECT key, note, enabled, created_at FROM api_keys ORDER BY created_at DESC');
-    res.json({ keys: result.rows });
+    const result = await db.query(
+      'SELECT note, uses_remaining FROM invite_links WHERE code = $1',
+      [req.params.code]
+    );
+    const row = result.rows[0];
+    if (!row || row.uses_remaining <= 0) {
+      return res.json({ valid: false });
+    }
+    res.json({ valid: true, note: row.note, uses_remaining: row.uses_remaining });
   } catch (err) {
-    console.error('GET /api/keys:', err.message);
+    console.error('GET /api/invite/:code:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── POST /api/keys ────────────────────────────────────────────────────────────
+// ── POST /api/invite/:code — register via invite ──────────────────────────────
 
-app.post('/api/keys', async (req, res) => {
-  if (!requireAuth(req, res, ['admin'])) return;
-  const note = req.body?.note || '';
+app.post('/api/invite/:code', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password required' });
+  }
+  const client = await db.connect();
   try {
+    await client.query('BEGIN');
+    const inviteResult = await client.query(
+      'SELECT id, uses_remaining FROM invite_links WHERE code = $1 FOR UPDATE',
+      [req.params.code]
+    );
+    const invite = inviteResult.rows[0];
+    if (!invite || invite.uses_remaining <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Invite link is invalid or exhausted' });
+    }
+    const hash = await bcrypt.hash(password, 10);
+    const userResult = await client.query(
+      `INSERT INTO admin_users (username, password_hash, role, invite_id)
+       VALUES ($1, $2, 'contributor', $3)
+       RETURNING id, username, role`,
+      [username, hash, invite.id]
+    );
+    const user = userResult.rows[0];
     let key, attempts = 0;
     do {
       key = generateKey();
       attempts++;
-    } while (attempts < 10 && (await db.query('SELECT 1 FROM api_keys WHERE key = $1', [key])).rows.length);
-
-    await db.query('INSERT INTO api_keys (key, note) VALUES ($1, $2)', [key, note]);
-    res.json({ key, note, enabled: true });
+    } while (attempts < 10 && (await client.query('SELECT 1 FROM contributor_tokens WHERE key = $1', [key])).rows.length);
+    await client.query(
+      'INSERT INTO contributor_tokens (user_id, key) VALUES ($1, $2)',
+      [user.id, key]
+    );
+    await client.query(
+      'UPDATE invite_links SET uses_remaining = uses_remaining - 1 WHERE id = $1',
+      [invite.id]
+    );
+    await client.query('COMMIT');
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    res.json({ token: key, url: `${baseUrl}/api/samples/${key}` });
   } catch (err) {
-    console.error('POST /api/keys:', err.message);
+    await client.query('ROLLBACK');
+    if (err.code === '23505') return res.status(409).json({ error: 'Username already exists' });
+    console.error('POST /api/invite/:code:', err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
-// ── PATCH /api/keys/:key ──────────────────────────────────────────────────────
+// ── GET /api/me ───────────────────────────────────────────────────────────────
 
-app.patch('/api/keys/:key', async (req, res) => {
-  if (!requireAuth(req, res, ['admin'])) return;
-  const { note, enabled } = req.body || {};
-  const fields = [], values = [];
-  if (note !== undefined) { fields.push(`note = $${fields.length + 1}`); values.push(note); }
-  if (enabled !== undefined) { fields.push(`enabled = $${fields.length + 1}`); values.push(enabled); }
-  if (!fields.length) return res.status(400).json({ error: 'nothing to update' });
-  values.push(req.params.key.toUpperCase());
+app.get('/api/me', async (req, res) => {
+  const caller = requireAuth(req, res);
+  if (!caller) return;
   try {
     const result = await db.query(
-      `UPDATE api_keys SET ${fields.join(', ')} WHERE key = $${values.length} RETURNING key, note, enabled, created_at`,
-      values
+      'SELECT id, username, role, enabled, created_at FROM admin_users WHERE id = $1',
+      [caller.userId]
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Key not found' });
+    if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('PATCH /api/keys:', err.message);
+    console.error('GET /api/me:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── DELETE /api/keys/:key ─────────────────────────────────────────────────────
+// ── PATCH /api/me/password ────────────────────────────────────────────────────
 
-app.delete('/api/keys/:key', async (req, res) => {
-  if (!requireAuth(req, res, ['admin'])) return;
+app.patch('/api/me/password', async (req, res) => {
+  const caller = requireAuth(req, res);
+  if (!caller) return;
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'currentPassword and newPassword required' });
+  }
   try {
-    const result = await db.query('DELETE FROM api_keys WHERE key = $1', [req.params.key.toUpperCase()]);
-    if (!result.rowCount) return res.status(404).json({ error: 'Key not found' });
+    const result = await db.query('SELECT password_hash FROM admin_users WHERE id = $1', [caller.userId]);
+    if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
+    const match = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
+    if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await db.query('UPDATE admin_users SET password_hash = $1 WHERE id = $2', [newHash, caller.userId]);
     res.json({ success: true });
   } catch (err) {
-    console.error('DELETE /api/keys:', err.message);
+    console.error('PATCH /api/me/password:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/me/token ─────────────────────────────────────────────────────────
+
+app.get('/api/me/token', async (req, res) => {
+  const caller = requireAuth(req, res);
+  if (!caller) return;
+  if (caller.role !== 'contributor') return res.json({ token: null });
+  try {
+    const result = await db.query(
+      'SELECT key, created_at FROM contributor_tokens WHERE user_id = $1 AND active = TRUE ORDER BY created_at DESC LIMIT 1',
+      [caller.userId]
+    );
+    if (!result.rows.length) return res.json({ token: null });
+    const { key, created_at } = result.rows[0];
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    res.json({ key, url: `${baseUrl}/api/samples/${key}`, created_at });
+  } catch (err) {
+    console.error('GET /api/me/token:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/me/token/refresh ────────────────────────────────────────────────
+
+app.post('/api/me/token/refresh', async (req, res) => {
+  const caller = requireAuth(req, res, ['contributor']);
+  if (!caller) return;
+  try {
+    await db.query('UPDATE contributor_tokens SET active = FALSE WHERE user_id = $1', [caller.userId]);
+    let key, attempts = 0;
+    do {
+      key = generateKey();
+      attempts++;
+    } while (attempts < 10 && (await db.query('SELECT 1 FROM contributor_tokens WHERE key = $1', [key])).rows.length);
+    await db.query('INSERT INTO contributor_tokens (user_id, key) VALUES ($1, $2)', [caller.userId, key]);
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    res.json({ key, url: `${baseUrl}/api/samples/${key}` });
+  } catch (err) {
+    console.error('POST /api/me/token/refresh:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/contributions/:key — my data map filter ─────────────────────────
+
+app.get('/api/contributions/:key', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const key = req.params.key?.toUpperCase();
+  try {
+    const authResult = await db.query(
+      'SELECT ct.user_id FROM contributor_tokens ct JOIN admin_users u ON ct.user_id = u.id WHERE ct.key = $1 AND u.enabled = TRUE',
+      [key]
+    );
+    if (!authResult.rows.length) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    const userId = authResult.rows[0].user_id;
+    const contribs = await db.query(
+      'SELECT geohash FROM user_contributions WHERE user_id = $1',
+      [userId]
+    );
+    res.json({ geohashes: contribs.rows.map(r => r.geohash) });
+  } catch (err) {
+    console.error('GET /api/contributions/:key:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/admin/contributors ───────────────────────────────────────────────
+
+app.get('/api/admin/contributors', async (req, res) => {
+  if (!requireAuth(req, res, ['admin', 'viewer'])) return;
+  try {
+    const result = await db.query(
+      `SELECT u.id, u.username, u.enabled, u.created_at,
+              i.note AS invite_note
+       FROM admin_users u
+       LEFT JOIN invite_links i ON u.invite_id = i.id
+       WHERE u.role = 'contributor'
+       ORDER BY u.created_at DESC`
+    );
+    res.json({ contributors: result.rows });
+  } catch (err) {
+    console.error('GET /api/admin/contributors:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /api/admin/contributors/:id ────────────────────────────────────────
+
+app.patch('/api/admin/contributors/:id', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  const { enabled } = req.body || {};
+  if (enabled === undefined) return res.status(400).json({ error: 'enabled required' });
+  try {
+    const result = await db.query(
+      `UPDATE admin_users SET enabled = $1 WHERE id = $2 AND role = 'contributor'
+       RETURNING id, username, enabled`,
+      [enabled, parseInt(req.params.id)]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Contributor not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('PATCH /api/admin/contributors/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/admin/token-search ───────────────────────────────────────────────
+
+app.get('/api/admin/token-search', async (req, res) => {
+  if (!requireAuth(req, res, ['admin', 'viewer'])) return;
+  const q = (req.query.q || '').toUpperCase().trim();
+  if (!q) return res.json({ results: [] });
+  try {
+    const result = await db.query(
+      `SELECT ct.key, ct.active, ct.created_at,
+              u.id AS user_id, u.username, u.enabled AS user_enabled
+       FROM contributor_tokens ct
+       JOIN admin_users u ON ct.user_id = u.id
+       WHERE ct.key LIKE $1
+       ORDER BY ct.created_at DESC
+       LIMIT 20`,
+      [`${q}%`]
+    );
+    res.json({
+      results: result.rows.map(r => ({
+        key: r.key,
+        active: r.active,
+        created_at: r.created_at,
+        user: { id: r.user_id, username: r.username, enabled: r.user_enabled },
+      })),
+    });
+  } catch (err) {
+    console.error('GET /api/admin/token-search:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/admin/invites ────────────────────────────────────────────────────
+
+app.get('/api/admin/invites', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  try {
+    const result = await db.query(
+      `SELECT i.id, i.code, i.note, i.uses_allowed, i.uses_remaining, i.created_at,
+              u.username AS created_by_username
+       FROM invite_links i
+       LEFT JOIN admin_users u ON i.created_by = u.id
+       ORDER BY i.created_at DESC`
+    );
+    res.json({ invites: result.rows });
+  } catch (err) {
+    console.error('GET /api/admin/invites:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/admin/invites ───────────────────────────────────────────────────
+
+app.post('/api/admin/invites', async (req, res) => {
+  const caller = requireAuth(req, res, ['admin']);
+  if (!caller) return;
+  const { note, uses_allowed } = req.body || {};
+  if (!uses_allowed || uses_allowed < 1) {
+    return res.status(400).json({ error: 'uses_allowed must be at least 1' });
+  }
+  try {
+    const code = generateInviteCode();
+    const result = await db.query(
+      `INSERT INTO invite_links (code, note, uses_allowed, uses_remaining, created_by)
+       VALUES ($1, $2, $3, $3, $4)
+       RETURNING id, code, note, uses_allowed, uses_remaining, created_at`,
+      [code, note || '', parseInt(uses_allowed), caller.userId]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('POST /api/admin/invites:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /api/admin/invites/:id ─────────────────────────────────────────────
+
+app.delete('/api/admin/invites/:id', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  try {
+    const result = await db.query('DELETE FROM invite_links WHERE id = $1', [parseInt(req.params.id)]);
+    if (!result.rowCount) return res.status(404).json({ error: 'Invite not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/admin/invites/:id:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -580,7 +845,7 @@ app.post('/api/admin/users', async (req, res) => {
   if (!requireAuth(req, res, ['admin'])) return;
   const { username, password, role } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'username and password required' });
-  if (!['admin', 'viewer'].includes(role)) return res.status(400).json({ error: 'role must be admin or viewer' });
+  if (!['admin', 'viewer', 'contributor'].includes(role)) return res.status(400).json({ error: 'role must be admin, viewer, or contributor' });
   try {
     const hash = await bcrypt.hash(password, 10);
     const result = await db.query(
@@ -608,7 +873,7 @@ app.patch('/api/admin/users/:id', async (req, res) => {
     values.push(await bcrypt.hash(password, 10));
   }
   if (role !== undefined) {
-    if (!['admin', 'viewer'].includes(role)) return res.status(400).json({ error: 'role must be admin or viewer' });
+    if (!['admin', 'viewer', 'contributor'].includes(role)) return res.status(400).json({ error: 'role must be admin, viewer, or contributor' });
     fields.push(`role = $${fields.length + 1}`);
     values.push(role);
   }
@@ -650,6 +915,11 @@ app.delete('/api/admin/users/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── /invite/:code — serve registration page ───────────────────────────────────
+
+app.get('/invite/:code', (req, res) =>
+  res.sendFile(path.join(__dirname, 'invite.html')));
 
 // ── Static frontend ───────────────────────────────────────────────────────────
 
