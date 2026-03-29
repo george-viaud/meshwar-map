@@ -653,7 +653,7 @@ app.delete('/api/admin/users/:id', async (req, res) => {
 
 // ── Static frontend ───────────────────────────────────────────────────────────
 
-app.use(express.static(path.join(__dirname)));
+app.use(express.static(path.join(__dirname), { extensions: ['html'] }));
 
 // ── Migrations ────────────────────────────────────────────────────────────────
 
