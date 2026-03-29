@@ -56,7 +56,7 @@ function updateMapTiles() {
 // Initialize map (Canvas renderer for performance)
 // ---------------------
 const map = L.map('map', {
-    center: [47.6062, -122.3321],
+    center: [47.6588, -117.4260],
     zoom: 10,
     preferCanvas: true,
     worldCopyJump: false,
