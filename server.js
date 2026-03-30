@@ -169,6 +169,7 @@ const CORS_HEADERS = {
 
 app.options('/api/samples', (req, res) => res.set(CORS_HEADERS).end());
 app.options('/api/samples/:key', (req, res) => res.set(CORS_HEADERS).end());
+app.options('/api/samples/:key/validate', (req, res) => res.set(CORS_HEADERS).end());
 
 // ── GET /api/samples ──────────────────────────────────────────────────────────
 
@@ -278,6 +279,46 @@ app.post('/api/samples', (req, res) => {
   res.status(401).json({
     error: 'This endpoint requires a contributor token. Use POST /api/samples/YOUR_TOKEN instead.',
   });
+});
+
+// ── GET /api/samples/:key/validate ───────────────────────────────────────────
+// Rate limit: 10 attempts per IP per minute
+
+app.get('/api/samples/:key/validate', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+
+  const ip = req.ip;
+  const rateLimitKey = `validate_rl:${ip}`;
+  const MAX = 10, WINDOW_SECS = 60;
+  try {
+    const count = await redis.incr(rateLimitKey);
+    if (count === 1) await redis.expire(rateLimitKey, WINDOW_SECS);
+    if (count > MAX) {
+      return res.status(429).json({ valid: false, error: 'Too many requests — try again shortly' });
+    }
+  } catch (err) {
+    console.error('validate rate limit redis error:', err.message);
+    // Redis failure: allow through rather than block legitimate users
+  }
+
+  const key = req.params.key?.toUpperCase();
+  try {
+    const result = await db.query(
+      `SELECT ct.active, u.enabled
+       FROM contributor_tokens ct
+       JOIN admin_users u ON ct.user_id = u.id
+       WHERE ct.key = $1`,
+      [key]
+    );
+    const row = result.rows[0];
+    if (!row || !row.active || !row.enabled) {
+      return res.status(401).json({ valid: false, error: 'Invalid or disabled token' });
+    }
+    res.json({ valid: true });
+  } catch (err) {
+    console.error('GET /api/samples/:key/validate:', err.message);
+    res.status(500).json({ valid: false, error: 'Server error' });
+  }
 });
 
 // ── POST /api/samples/:key ────────────────────────────────────────────────────
