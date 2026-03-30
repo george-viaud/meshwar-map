@@ -13,13 +13,15 @@ Secrets are passed as environment variables — no secrets files in the repo or 
 ### 1. Set secrets in the system environment
 
 ```bash
-sudo sh -c 'echo "PG_PASSWORD=your_strong_password" >> /etc/environment'
-sudo sh -c 'echo "ADMIN_TOKEN=your_admin_token"     >> /etc/environment'
+sudo sh -c 'echo "PG_PASSWORD=your_strong_password"   >> /etc/environment'
+sudo sh -c 'echo "ADMIN_TOKEN=your_admin_token"        >> /etc/environment'
+sudo sh -c 'echo "JWT_SECRET=$(openssl rand -hex 32)"  >> /etc/environment'
 source /etc/environment
 ```
 
 `PG_PASSWORD` — PostgreSQL password for the `wardrive` database user.
-`ADMIN_TOKEN` — Bearer token required for `DELETE /api/samples` (data wipe).
+`ADMIN_TOKEN` — Bearer token required for `DELETE /api/samples` (data wipe) and initial admin password.
+`JWT_SECRET` — **Required.** Secret used to sign session JWTs. Generate with `openssl rand -hex 32`. The server will refuse to start if this is absent.
 
 ### 2. Clone and start
 

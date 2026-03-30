@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const { Pool } = require('pg');
 const Redis = require('ioredis');
 const path = require('path');
@@ -7,9 +8,11 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { shardPrefix, decayFactor, computeSampleId, aggregateSamples } = require('./lib/aggregation');
+const { createRateLimiter } = require('./lib/rateLimit');
 
 const app = express();
 app.set('trust proxy', 1); // Trust X-Forwarded-Proto from reverse proxy
+app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // ── Database ──────────────────────────────────────────────────────────────────
@@ -36,7 +39,14 @@ const DEDUP_TTL = 60 * 60 * 24 * 90; // 90 days
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
 function jwtSecret() {
-  return process.env.JWT_SECRET || process.env.ADMIN_TOKEN;
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error('JWT_SECRET environment variable is required');
+  return s;
+}
+
+function internalError(res, err, context) {
+  console.error(`${context}:`, err.message);
+  res.status(500).json({ error: 'Internal server error' });
 }
 
 function requireAuth(req, res, roles = []) {
@@ -76,22 +86,12 @@ async function invalidateCaches(prefixes) {
   await redis.del(...keys);
 }
 
-// ── CORS headers ──────────────────────────────────────────────────────────────
-
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
-app.options('/api/samples', (req, res) => res.set(CORS_HEADERS).end());
-app.options('/api/samples/:key', (req, res) => res.set(CORS_HEADERS).end());
-app.options('/api/samples/:key/validate', (req, res) => res.set(CORS_HEADERS).end());
+const loginRateLimit = createRateLimiter(redis, { max: 10, window: 60, keyPrefix: 'login_rl' });
+const validateRateLimit = createRateLimiter(redis, { max: 10, window: 60, keyPrefix: 'validate_rl' });
 
 // ── GET /api/samples ──────────────────────────────────────────────────────────
 
 app.get('/api/samples', async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
 
   try {
     const version = await getGlobalVersion();
@@ -184,40 +184,21 @@ app.get('/api/samples', async (req, res) => {
     return res.set(commonHeaders).send(body);
 
   } catch (err) {
-    console.error('GET /api/samples:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'GET /api/samples');
   }
 });
 
 // ── POST /api/samples (legacy — reject with helpful message) ──────────────────
 
 app.post('/api/samples', (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
   res.status(401).json({
     error: 'This endpoint requires a contributor token. Use POST /api/samples/YOUR_TOKEN instead.',
   });
 });
 
 // ── GET /api/samples/:key/validate ───────────────────────────────────────────
-// Rate limit: 10 attempts per IP per minute
 
-app.get('/api/samples/:key/validate', async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
-
-  const ip = req.ip;
-  const rateLimitKey = `validate_rl:${ip}`;
-  const MAX = 10, WINDOW_SECS = 60;
-  try {
-    const count = await redis.incr(rateLimitKey);
-    if (count === 1) await redis.expire(rateLimitKey, WINDOW_SECS);
-    if (count > MAX) {
-      return res.status(429).json({ valid: false, error: 'Too many requests — try again shortly' });
-    }
-  } catch (err) {
-    console.error('validate rate limit redis error:', err.message);
-    // Redis failure: allow through rather than block legitimate users
-  }
-
+app.get('/api/samples/:key/validate', validateRateLimit, async (req, res) => {
   const key = req.params.key?.toUpperCase();
   try {
     const result = await db.query(
@@ -233,15 +214,13 @@ app.get('/api/samples/:key/validate', async (req, res) => {
     }
     res.json({ valid: true });
   } catch (err) {
-    console.error('GET /api/samples/:key/validate:', err.message);
-    res.status(500).json({ valid: false, error: 'Server error' });
+    internalError(res, err, 'GET /api/samples/:key/validate');
   }
 });
 
 // ── POST /api/samples/:key ────────────────────────────────────────────────────
 
 app.post('/api/samples/:key', async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
 
   const key = req.params.key?.toUpperCase();
   const authResult = await db.query(
@@ -412,15 +391,13 @@ app.post('/api/samples/:key', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('POST /api/samples/:key:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'POST /api/samples/:key');
   }
 });
 
 // ── DELETE /api/samples ───────────────────────────────────────────────────────
 
 app.delete('/api/samples', async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
 
   const auth = req.headers['authorization'];
   if (!auth || auth !== `Bearer ${process.env.ADMIN_TOKEN}`) {
@@ -438,14 +415,13 @@ app.delete('/api/samples', async (req, res) => {
 
     res.json({ success: true, message: 'All data cleared' });
   } catch (err) {
-    console.error('DELETE /api/samples:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'DELETE /api/samples');
   }
 });
 
 // ── POST /api/auth/login ──────────────────────────────────────────────────────
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginRateLimit, async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'username and password required' });
@@ -470,8 +446,7 @@ app.post('/api/auth/login', async (req, res) => {
     );
     res.json({ token, username: user.username, role: user.role });
   } catch (err) {
-    console.error('POST /api/auth/login:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'POST /api/auth/login');
   }
 });
 
@@ -489,8 +464,7 @@ app.get('/api/invite/:code', async (req, res) => {
     }
     res.json({ valid: true, note: row.note, uses_remaining: row.uses_remaining });
   } catch (err) {
-    console.error('GET /api/invite/:code:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'GET /api/invite/:code');
   }
 });
 
@@ -540,8 +514,7 @@ app.post('/api/invite/:code', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Username already exists' });
-    console.error('POST /api/invite/:code:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'POST /api/invite/:code');
   } finally {
     client.release();
   }
@@ -560,8 +533,7 @@ app.get('/api/me', async (req, res) => {
     if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('GET /api/me:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'GET /api/me');
   }
 });
 
@@ -583,8 +555,7 @@ app.patch('/api/me/password', async (req, res) => {
     await db.query('UPDATE admin_users SET password_hash = $1 WHERE id = $2', [newHash, caller.userId]);
     res.json({ success: true });
   } catch (err) {
-    console.error('PATCH /api/me/password:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'PATCH /api/me/password');
   }
 });
 
@@ -604,8 +575,7 @@ app.get('/api/me/token', async (req, res) => {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     res.json({ key, url: `${baseUrl}/api/samples/${key}`, created_at });
   } catch (err) {
-    console.error('GET /api/me/token:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'GET /api/me/token');
   }
 });
 
@@ -625,15 +595,13 @@ app.post('/api/me/token/refresh', async (req, res) => {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     res.json({ key, url: `${baseUrl}/api/samples/${key}` });
   } catch (err) {
-    console.error('POST /api/me/token/refresh:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'POST /api/me/token/refresh');
   }
 });
 
 // ── GET /api/contributions/:key — my data map filter ─────────────────────────
 
 app.get('/api/contributions/:key', async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
   const key = req.params.key?.toUpperCase();
   try {
     const authResult = await db.query(
@@ -650,8 +618,7 @@ app.get('/api/contributions/:key', async (req, res) => {
     );
     res.json({ geohashes: contribs.rows.map(r => r.geohash) });
   } catch (err) {
-    console.error('GET /api/contributions/:key:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'GET /api/contributions/:key');
   }
 });
 
@@ -670,8 +637,7 @@ app.get('/api/admin/contributors', async (req, res) => {
     );
     res.json({ contributors: result.rows });
   } catch (err) {
-    console.error('GET /api/admin/contributors:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'GET /api/admin/contributors');
   }
 });
 
@@ -690,8 +656,7 @@ app.patch('/api/admin/contributors/:id', async (req, res) => {
     if (!result.rows.length) return res.status(404).json({ error: 'Contributor not found' });
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('PATCH /api/admin/contributors/:id:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'PATCH /api/admin/contributors/:id');
   }
 });
 
@@ -721,8 +686,7 @@ app.get('/api/admin/token-search', async (req, res) => {
       })),
     });
   } catch (err) {
-    console.error('GET /api/admin/token-search:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'GET /api/admin/token-search');
   }
 });
 
@@ -740,8 +704,7 @@ app.get('/api/admin/invites', async (req, res) => {
     );
     res.json({ invites: result.rows });
   } catch (err) {
-    console.error('GET /api/admin/invites:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'GET /api/admin/invites');
   }
 });
 
@@ -764,8 +727,7 @@ app.post('/api/admin/invites', async (req, res) => {
     );
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('POST /api/admin/invites:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'POST /api/admin/invites');
   }
 });
 
@@ -778,8 +740,7 @@ app.delete('/api/admin/invites/:id', async (req, res) => {
     if (!result.rowCount) return res.status(404).json({ error: 'Invite not found' });
     res.json({ success: true });
   } catch (err) {
-    console.error('DELETE /api/admin/invites/:id:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'DELETE /api/admin/invites/:id');
   }
 });
 
@@ -793,8 +754,7 @@ app.get('/api/admin/users', async (req, res) => {
     );
     res.json({ users: result.rows });
   } catch (err) {
-    console.error('GET /api/admin/users:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'GET /api/admin/users');
   }
 });
 
@@ -814,8 +774,7 @@ app.post('/api/admin/users', async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Username already exists' });
-    console.error('POST /api/admin/users:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'POST /api/admin/users');
   }
 });
 
@@ -853,8 +812,7 @@ app.patch('/api/admin/users/:id', async (req, res) => {
     if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('PATCH /api/admin/users:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'PATCH /api/admin/users');
   }
 });
 
@@ -870,8 +828,7 @@ app.delete('/api/admin/users/:id', async (req, res) => {
     if (!result.rowCount) return res.status(404).json({ error: 'User not found' });
     res.json({ success: true });
   } catch (err) {
-    console.error('DELETE /api/admin/users:', err.message);
-    res.status(500).json({ error: err.message });
+    internalError(res, err, 'DELETE /api/admin/users');
   }
 });
 
