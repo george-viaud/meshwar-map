@@ -39,12 +39,20 @@ Add a proxy host:
 - **Forward port**: `3001`
 - Enable SSL via Let's Encrypt
 
-### 4. Update the Android app
+### 4. Create admin account and invite contributors
 
-In the app settings, set the upload URL to:
+On first start the server bootstraps an `admin` user with password set to `ADMIN_TOKEN`.
+Sign in at `https://your-domain/admin`, then:
+
+1. Go to **Invites** → create an invite link
+2. Share the link with contributors — they register and receive their Contributor Token
+3. Contributors enter the token in the Android app: **Settings → Configure API → Contributor Token**
+
+The server URL field in the app should be set to:
 ```
-https://wardrive.inwmesh.org/api/samples
+https://your-domain/api/samples/
 ```
+(The token is stored separately and appended automatically.)
 
 ---
 
@@ -77,13 +85,18 @@ docker compose exec postgres psql -U wardrive -d wardrive
 
 ```
 Nginx Proxy Manager → app:3000 (Node.js)
-                          ├── GET  /api/samples        — shard index or shard data
-                          ├── GET  /api/samples?prefixes=xyz,abc  — specific shards
-                          ├── POST /api/samples        — upload wardrive samples
-                          ├── DELETE /api/samples      — wipe data (admin token required)
-                          └── /*                       — static map frontend
-                      postgres:5432 (coverage data, persistent)
-                      redis:6379    (deduplication TTLs, API response cache)
+                          ├── GET  /api/samples                    — shard index or shard data
+                          ├── GET  /api/samples?prefixes=xyz,abc   — specific shards
+                          ├── POST /api/samples/:token             — upload wardrive samples (token required)
+                          ├── GET  /api/samples/:token/validate    — validate contributor token
+                          ├── GET  /api/contributions/:token       — geohashes contributed by token
+                          ├── DELETE /api/samples                  — wipe data (admin token required)
+                          ├── POST /api/invite/:code               — contributor registration
+                          ├── POST /api/auth/login                 — admin/viewer login
+                          ├── GET  /api/me/token                   — get own contributor token
+                          └── /*                                   — static map + admin + invite frontend
+                      postgres:5432 (coverage data + users + tokens, persistent)
+                      redis:6379    (deduplication TTLs, token validation rate limiting, API cache)
 ```
 
 ## Data persistence

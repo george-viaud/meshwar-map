@@ -26,8 +26,8 @@ Returns the shard index with coverage metadata.
 ### GET `/api/samples?prefixes=xyz,abc`
 Returns coverage cell data for the specified geohash shard prefixes.
 
-### POST `/api/samples`
-Upload new samples from the Android app.
+### POST `/api/samples/:token`
+Upload new samples. Requires a valid contributor token in the URL path.
 
 ```json
 {
@@ -40,11 +40,18 @@ Upload new samples from the Android app.
       "snr": 8,
       "pingSuccess": true,
       "timestamp": "2026-01-06T00:00:00Z",
-      "appVersion": "1.0.24"
+      "appVersion": "1.0.25"
     }
   ]
 }
 ```
+
+### GET `/api/samples/:token/validate`
+Check whether a contributor token is valid. Returns `{ valid: true }` or `{ valid: false, error: "..." }`.
+Rate limited to 10 requests/IP/minute.
+
+### GET `/api/contributions/:token`
+Returns the geohash cells contributed by this token (used for "my data" map filter).
 
 ### DELETE `/api/samples`
 Wipe all data. Requires `Authorization: Bearer <ADMIN_TOKEN>` header.
@@ -54,7 +61,8 @@ Wipe all data. Requires `Authorization: Bearer <ADMIN_TOKEN>` header.
 The companion Android app is at:
 https://github.com/george-viaud/Meshcore-Wardrive-Android
 
-Upload endpoint: `https://wardrive.inwmesh.org/api/samples`
+Contributors need an invite from an admin — registration is at `/invite/:code`.
+Once registered, the Contributor Token is entered in the app's **Settings → Configure API**.
 
 ## Credits
 
