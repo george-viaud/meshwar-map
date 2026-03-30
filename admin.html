@@ -241,17 +241,17 @@
         <span class="section-title">My Submission Token</span>
       </div>
       <div class="token-card">
-        <div class="token-url-label">Submission URL</div>
+        <div class="token-url-label">Contributor Token</div>
         <div class="token-url-box loading" id="mytoken-url-display">Loading...</div>
         <div class="token-actions">
-          <button class="btn btn-accent" onclick="copyMyToken()">Copy URL</button>
+          <button class="btn btn-accent" onclick="copyMyToken()">Copy Token</button>
           <button class="btn btn-warn" onclick="refreshTokenConfirm()">Refresh Token</button>
           <a class="btn btn-secondary" href="/" id="mytoken-map-link">View My Data on Map</a>
         </div>
         <div class="token-meta" id="mytoken-meta"></div>
         <div class="token-warning">
           <span class="token-warning-icon">&#9888;</span>
-          <span>Refreshing your token will invalidate the current URL. You will need to update your app's API URL setting.</span>
+          <span>Refreshing your token will invalidate the current one. You will need to update the Contributor Token in your app.</span>
         </div>
       </div>
       <div class="token-card">
@@ -259,7 +259,7 @@
         <div style="font-size:13px; color:var(--text-secondary); line-height:1.7; margin-top:4px;">
           1. Open <strong>MeshCore Wardrive</strong> &rarr; menu (&#9776;) &rarr; <strong>Settings</strong><br>
           2. Under <strong>Online Map</strong> &rarr; tap <strong>Configure API</strong><br>
-          3. Paste your Submission URL into the <strong>API URL</strong> field &rarr; <strong>Save</strong>
+          3. Paste your token into the <strong>Contributor Token</strong> field &rarr; <strong>Save</strong>
         </div>
       </div>
       <div id="mytoken-msg"></div>
@@ -418,7 +418,7 @@
 <div class="modal-overlay hidden" id="refresh-modal">
   <div class="modal-card">
     <div class="modal-title">Refresh Token?</div>
-    <p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px;">Your current submission URL will stop working immediately. You will need to update the API URL in your app.</p>
+    <p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px;">Your current token will stop working immediately. You will need to update the Contributor Token in your app.</p>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="document.getElementById('refresh-modal').classList.add('hidden')">Cancel</button>
       <button class="btn btn-danger" onclick="doRefreshToken()">Yes, Refresh Token</button>
@@ -553,7 +553,7 @@ function doSignout() {
 }
 
 // ── My Token tab ──────────────────────────────────────────
-let myTokenUrl = '';
+let myTokenKey = '';
 
 async function loadMyToken() {
   const el = document.getElementById('mytoken-url-display');
@@ -567,16 +567,16 @@ async function loadMyToken() {
     metaEl.textContent = '';
     return;
   }
-  myTokenUrl = r.data.url;
+  myTokenKey = r.data.key;
   el.className = 'token-url-box';
-  el.textContent = r.data.url;
+  el.textContent = r.data.key;
   metaEl.textContent = `Token created: ${fmtDate(r.data.created_at)}`;
   sessionStorage.setItem('mapContributorKey', r.data.key);
 }
 
 async function copyMyToken() {
-  if (!myTokenUrl) return;
-  try { await navigator.clipboard.writeText(myTokenUrl); showMsg('mytoken-msg', 'URL copied to clipboard.', true); }
+  if (!myTokenKey) return;
+  try { await navigator.clipboard.writeText(myTokenKey); showMsg('mytoken-msg', 'Token copied to clipboard.', true); }
   catch { showMsg('mytoken-msg', 'Copy failed — select and copy manually.', false); }
 }
 
@@ -589,13 +589,13 @@ async function doRefreshToken() {
   const r = await api('POST', '/api/me/token/refresh');
   if (!r) return;
   if (!r.ok) { showMsg('mytoken-msg', r.data.error || 'Failed to refresh token', false); return; }
-  myTokenUrl = r.data.url;
+  myTokenKey = r.data.key;
   const el = document.getElementById('mytoken-url-display');
   el.className = 'token-url-box';
-  el.textContent = r.data.url;
+  el.textContent = r.data.key;
   sessionStorage.setItem('mapContributorKey', r.data.key);
   document.getElementById('mytoken-meta').textContent = 'Token refreshed just now';
-  showMsg('mytoken-msg', 'Token refreshed. Update your app\'s API URL.', true);
+  showMsg('mytoken-msg', 'Token refreshed. Update the Contributor Token in your app.', true);
 }
 
 // ── My Account tab ────────────────────────────────────────

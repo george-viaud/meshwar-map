@@ -354,17 +354,17 @@
     <!-- Token reveal -->
     <div id="state-token" class="token-reveal">
       <h2>You're In!</h2>
-      <p class="subtitle">Copy your submission URL and paste it into the MeshCore Wardrive app.</p>
+      <p class="subtitle">Copy your contributor token and paste it into the MeshCore Wardrive app.</p>
 
       <div class="url-box">
-        <div class="url-label">Your Submission URL</div>
+        <div class="url-label">Your Contributor Token</div>
         <div class="url-value" id="token-url"></div>
-        <button class="copy-btn" id="copy-btn" onclick="copyUrl()">Copy URL</button>
+        <button class="copy-btn" id="copy-btn" onclick="copyUrl()">Copy Token</button>
       </div>
 
       <div class="save-warning">
         <span class="save-warning-icon">&#9888;</span>
-        <span>Save this URL now — you can always retrieve it later by signing in to your account.</span>
+        <span>Save this token now — you can always retrieve it later by signing in to your account.</span>
       </div>
 
       <div class="instructions">
@@ -379,7 +379,7 @@
         </div>
         <div class="step">
           <div class="step-num">3</div>
-          <div class="step-text">Paste your URL into the <strong>API URL</strong> field &rarr; tap <strong>Save</strong></div>
+          <div class="step-text">Paste your token into the <strong>Contributor Token</strong> field &rarr; tap <strong>Save</strong></div>
         </div>
       </div>
 
@@ -390,7 +390,7 @@
 
 <script>
   const code = window.location.pathname.split('/invite/')[1];
-  let submissionUrl = '';
+  let contributorToken = '';
 
   function show(stateId) {
     ['state-loading', 'state-invalid', 'state-register', 'state-token'].forEach(id => {
@@ -438,8 +438,8 @@
       });
       const data = await res.json();
       if (!res.ok) { showErr(data.error || 'Registration failed'); btn.disabled = false; btn.textContent = 'Create Account'; return; }
-      submissionUrl = data.url;
-      document.getElementById('token-url').textContent = data.url;
+      contributorToken = data.token;
+      document.getElementById('token-url').textContent = data.token;
       show('state-token');
     } catch {
       showErr('Network error — please try again');
@@ -457,9 +457,9 @@
   async function copyUrl() {
     const btn = document.getElementById('copy-btn');
     try {
-      await navigator.clipboard.writeText(submissionUrl);
+      await navigator.clipboard.writeText(contributorToken);
       btn.textContent = 'Copied!';
-      setTimeout(() => btn.textContent = 'Copy URL', 2000);
+      setTimeout(() => btn.textContent = 'Copy Token', 2000);
     } catch {
       btn.textContent = 'Copy failed';
     }
