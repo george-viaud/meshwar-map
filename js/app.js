@@ -1019,21 +1019,47 @@ function showRepeaterInfo(name, rssi, snr, lastSeen) {
 let contributorToken = null; // JWT for portal API calls
 let contributorKey = null;   // submission key for /api/contributions/:key
 
-function initContributorSession() {
-    const token = sessionStorage.getItem('mapContributorToken');
-    const username = sessionStorage.getItem('mapContributorUsername');
-    const key = sessionStorage.getItem('mapContributorKey');
-    if (token && username && key) {
-        contributorToken = token;
-        contributorKey = key;
+async function initContributorSession() {
+    // Use the same sessionStorage keys as admin.html so sessions are shared
+    const token = sessionStorage.getItem('token');
+    const username = sessionStorage.getItem('username');
+    const role = sessionStorage.getItem('role');
+    if (!token || !username) return;
+
+    // Show portal link for any logged-in user
+    document.getElementById('portal-btn').style.display = '';
+
+    if (role !== 'contributor') return;
+
+    contributorToken = token;
+
+    // Try cached key first, otherwise fetch from API
+    const cachedKey = sessionStorage.getItem('mapContributorKey');
+    if (cachedKey) {
+        contributorKey = cachedKey;
         showContributorSignedIn(username);
+        return;
     }
+
+    try {
+        const res = await fetch('/api/me/token', {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) { sessionStorage.clear(); return; }
+        const data = await res.json();
+        if (data.key) {
+            contributorKey = data.key;
+            sessionStorage.setItem('mapContributorKey', data.key);
+            showContributorSignedIn(username);
+        }
+    } catch { /* network error — silent */ }
 }
 
 function showContributorSignedIn(username) {
     document.getElementById('mydata-signedout').style.display = 'none';
     document.getElementById('mydata-signedin').style.display = '';
     document.getElementById('mydata-username').textContent = username;
+    document.getElementById('portal-btn').style.display = '';
 }
 
 function showContributorSignedOut() {
@@ -1100,14 +1126,14 @@ async function submitContributorLogin() {
             return;
         }
 
-        contributorToken = loginData.token;
-        contributorKey = tokenData.key;
-        sessionStorage.setItem('mapContributorToken', loginData.token);
-        sessionStorage.setItem('mapContributorUsername', loginData.username);
+        // Store with shared keys so admin.html also picks up the session
+        sessionStorage.setItem('token', loginData.token);
+        sessionStorage.setItem('username', loginData.username);
+        sessionStorage.setItem('role', loginData.role);
         sessionStorage.setItem('mapContributorKey', tokenData.key);
 
         closeContributorLogin();
-        showContributorSignedIn(loginData.username);
+        window.location.href = '/admin';
     } catch {
         errEl.textContent = 'Network error — try again';
         errEl.style.display = '';
@@ -1120,12 +1146,14 @@ async function submitContributorLogin() {
 function contributorSignOut() {
     contributorToken = null;
     contributorKey = null;
-    sessionStorage.removeItem('mapContributorToken');
-    sessionStorage.removeItem('mapContributorUsername');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('username');
+    sessionStorage.removeItem('role');
     sessionStorage.removeItem('mapContributorKey');
     myDataFilterActive = false;
     myDataHashes = null;
     myDataPrefixSets = {};
+    document.getElementById('portal-btn').style.display = 'none';
     showContributorSignedOut();
     renderVisibleCoverage();
 }

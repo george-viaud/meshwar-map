@@ -24,6 +24,8 @@
         <span class="theme-toggle-icon" id="theme-icon">☀️</span>
     </div>
 
+    <a id="portal-btn" href="/admin" title="Go to portal" style="display:none; position:absolute; top:10px; right:110px; background:rgba(30,30,30,0.95); padding:10px 12px; border-radius:6px; z-index:1001; color:#00e676; font-size:12px; font-weight:600; text-decoration:none; border:1px solid rgba(0,230,118,0.25); white-space:nowrap;">Portal</a>
+
     <div class="measure-control hidden" id="measure-control">
         <button class="measure-btn" id="measure-btn" onclick="toggleMeasure()">📏 Measure Distance</button>
         <div class="unit-selector">
@@ -98,7 +100,7 @@
             <div id="mydata-signedin" style="display:none;">
                 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
                     <span id="mydata-username" style="font-size:12px; color:#fff; font-weight:600;"></span>
-                    <button onclick="contributorSignOut()" style="background:none; border:none; color:#666; font-size:11px; cursor:pointer; padding:0;">Sign out</button>
+                    <a href="/admin" style="font-size:11px; color:#00e676; text-decoration:none;">Portal &rarr;</a>
                 </div>
                 <div class="toggle-item">
                     <input type="checkbox" id="toggle-mydata" onchange="onMyDataToggle()">

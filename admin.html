@@ -246,7 +246,7 @@
         <div class="token-actions">
           <button class="btn btn-accent" onclick="copyMyToken()">Copy URL</button>
           <button class="btn btn-warn" onclick="refreshTokenConfirm()">Refresh Token</button>
-          <a class="btn btn-secondary" href="/?mydata=1" id="mytoken-map-link" target="_blank">View My Data on Map</a>
+          <a class="btn btn-secondary" href="/" id="mytoken-map-link">View My Data on Map</a>
         </div>
         <div class="token-meta" id="mytoken-meta"></div>
         <div class="token-warning">
@@ -571,7 +571,7 @@ async function loadMyToken() {
   el.className = 'token-url-box';
   el.textContent = r.data.url;
   metaEl.textContent = `Token created: ${fmtDate(r.data.created_at)}`;
-  document.getElementById('mytoken-map-link').href = `/?mydata=token=${encodeURIComponent(r.data.key)}`;
+  sessionStorage.setItem('mapContributorKey', r.data.key);
 }
 
 async function copyMyToken() {
@@ -593,6 +593,7 @@ async function doRefreshToken() {
   const el = document.getElementById('mytoken-url-display');
   el.className = 'token-url-box';
   el.textContent = r.data.url;
+  sessionStorage.setItem('mapContributorKey', r.data.key);
   document.getElementById('mytoken-meta').textContent = 'Token refreshed just now';
   showMsg('mytoken-msg', 'Token refreshed. Update your app\'s API URL.', true);
 }
