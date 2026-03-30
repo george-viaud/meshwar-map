@@ -84,19 +84,29 @@
         </div>
 
         <div class="layer-toggles" id="mydata-section">
-            <div style="font-size: 12px; font-weight: 600; margin-bottom: 6px; color: #aaa;">My Data</div>
-            <div class="toggle-item">
-                <input type="checkbox" id="toggle-mydata" onchange="onMyDataToggle()">
-                <label for="toggle-mydata">Show only my contributions</label>
+            <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px; color: #aaa;">My Data</div>
+
+            <!-- Signed out -->
+            <div id="mydata-signedout">
+                <button onclick="openContributorLogin()"
+                    style="width:100%; padding:7px 10px; background:rgba(0,230,118,0.1); border:1px solid rgba(0,230,118,0.25); border-radius:5px; color:#00e676; font-size:12px; font-family:inherit; cursor:pointer;">
+                    Sign In as Contributor
+                </button>
             </div>
-            <div id="mydata-input-row" style="display:none; margin-top: 8px;">
-                <input type="text" id="mydata-key-input" placeholder="Paste your submission URL or token"
-                    style="width:100%; background:rgba(255,255,255,0.05); border:1px solid #333; border-radius:5px; color:#fff; padding:7px 10px; font-size:12px; font-family:inherit; outline:none;"
-                    onkeydown="if(event.key==='Enter') applyMyDataFilter()">
-                <button onclick="applyMyDataFilter()" style="margin-top:6px; width:100%; padding:6px; background:rgba(0,230,118,0.12); border:1px solid rgba(0,230,118,0.25); border-radius:5px; color:#00e676; font-size:12px; font-family:inherit; cursor:pointer;">Apply</button>
+
+            <!-- Signed in -->
+            <div id="mydata-signedin" style="display:none;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                    <span id="mydata-username" style="font-size:12px; color:#fff; font-weight:600;"></span>
+                    <button onclick="contributorSignOut()" style="background:none; border:none; color:#666; font-size:11px; cursor:pointer; padding:0;">Sign out</button>
+                </div>
+                <div class="toggle-item">
+                    <input type="checkbox" id="toggle-mydata" onchange="onMyDataToggle()">
+                    <label for="toggle-mydata">Show only my contributions</label>
+                </div>
+                <div id="mydata-active-label" style="display:none; font-size:11px; color:#00e676; margin-top:6px;">&#10003; Showing your data only</div>
+                <div id="mydata-error" style="display:none; font-size:11px; color:#f44336; margin-top:6px;"></div>
             </div>
-            <div id="mydata-active-label" style="display:none; font-size:11px; color:#00e676; margin-top:6px;">&#10003; Showing your data only</div>
-            <div id="mydata-error" style="display:none; font-size:11px; color:#f44336; margin-top:6px;"></div>
         </div>
 
         <div class="legend">
@@ -164,6 +174,36 @@
                 <button class="modal-close" onclick="closeModal()" aria-label="Close">&times;</button>
             </div>
             <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Contributor login modal -->
+    <div id="contributor-login-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:3000; display:none; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+        <div style="background:#1e1e1e; border:1px solid #333; border-radius:10px; padding:28px; width:320px; max-width:calc(100vw - 32px); box-shadow:0 24px 64px rgba(0,0,0,0.7);">
+            <div style="font-size:15px; font-weight:700; margin-bottom:20px; color:#fff;">Sign In</div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:#aaa; margin-bottom:6px;">Username</label>
+                <input type="text" id="cl-username" autocapitalize="none" autocomplete="username"
+                    style="width:100%; background:rgba(255,255,255,0.05); border:1px solid #333; border-radius:6px; color:#fff; padding:9px 12px; font-size:14px; font-family:inherit; outline:none;"
+                    onkeydown="if(event.key==='Enter') document.getElementById('cl-password').focus()">
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:#aaa; margin-bottom:6px;">Password</label>
+                <input type="password" id="cl-password" autocomplete="current-password"
+                    style="width:100%; background:rgba(255,255,255,0.05); border:1px solid #333; border-radius:6px; color:#fff; padding:9px 12px; font-size:14px; font-family:inherit; outline:none;"
+                    onkeydown="if(event.key==='Enter') submitContributorLogin()">
+            </div>
+            <div id="cl-error" style="display:none; font-size:12px; color:#f44336; background:rgba(244,67,54,0.1); border:1px solid rgba(244,67,54,0.2); border-radius:5px; padding:8px 10px; margin-bottom:12px;"></div>
+            <div style="display:flex; gap:8px;">
+                <button onclick="submitContributorLogin()" id="cl-btn"
+                    style="flex:1; padding:9px; background:#00e676; border:none; border-radius:6px; color:#000; font-size:13px; font-weight:700; font-family:inherit; cursor:pointer;">
+                    Sign In
+                </button>
+                <button onclick="closeContributorLogin()"
+                    style="padding:9px 16px; background:transparent; border:1px solid #333; border-radius:6px; color:#aaa; font-size:13px; font-family:inherit; cursor:pointer;">
+                    Cancel
+                </button>
+            </div>
         </div>
     </div>
 

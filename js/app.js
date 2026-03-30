@@ -1014,11 +1014,127 @@ function showRepeaterInfo(name, rssi, snr, lastSeen) {
 })();
 
 // ---------------------
+// Contributor session
+// ---------------------
+let contributorToken = null; // JWT for portal API calls
+let contributorKey = null;   // submission key for /api/contributions/:key
+
+function initContributorSession() {
+    const token = sessionStorage.getItem('mapContributorToken');
+    const username = sessionStorage.getItem('mapContributorUsername');
+    const key = sessionStorage.getItem('mapContributorKey');
+    if (token && username && key) {
+        contributorToken = token;
+        contributorKey = key;
+        showContributorSignedIn(username);
+    }
+}
+
+function showContributorSignedIn(username) {
+    document.getElementById('mydata-signedout').style.display = 'none';
+    document.getElementById('mydata-signedin').style.display = '';
+    document.getElementById('mydata-username').textContent = username;
+}
+
+function showContributorSignedOut() {
+    document.getElementById('mydata-signedout').style.display = '';
+    document.getElementById('mydata-signedin').style.display = 'none';
+    const cb = document.getElementById('toggle-mydata');
+    if (cb) cb.checked = false;
+}
+
+function openContributorLogin() {
+    const modal = document.getElementById('contributor-login-modal');
+    modal.style.display = 'flex';
+    document.getElementById('cl-username').value = '';
+    document.getElementById('cl-password').value = '';
+    document.getElementById('cl-error').style.display = 'none';
+    setTimeout(() => document.getElementById('cl-username').focus(), 50);
+}
+
+function closeContributorLogin() {
+    document.getElementById('contributor-login-modal').style.display = 'none';
+}
+
+async function submitContributorLogin() {
+    const username = document.getElementById('cl-username').value.trim();
+    const password = document.getElementById('cl-password').value;
+    const errEl = document.getElementById('cl-error');
+    const btn = document.getElementById('cl-btn');
+
+    errEl.style.display = 'none';
+    if (!username || !password) { errEl.textContent = 'Username and password required'; errEl.style.display = ''; return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Signing in...';
+
+    try {
+        const loginRes = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const loginData = await loginRes.json();
+        if (!loginRes.ok) {
+            errEl.textContent = loginData.error || 'Invalid credentials';
+            errEl.style.display = '';
+            btn.disabled = false; btn.textContent = 'Sign In';
+            return;
+        }
+        if (loginData.role !== 'contributor') {
+            errEl.textContent = 'Only contributor accounts can sign in here.';
+            errEl.style.display = '';
+            btn.disabled = false; btn.textContent = 'Sign In';
+            return;
+        }
+
+        // Fetch submission token
+        const tokenRes = await fetch('/api/me/token', {
+            headers: { Authorization: `Bearer ${loginData.token}` },
+        });
+        const tokenData = await tokenRes.json();
+        if (!tokenRes.ok || !tokenData.key) {
+            errEl.textContent = 'Could not load your token. Contact an admin.';
+            errEl.style.display = '';
+            btn.disabled = false; btn.textContent = 'Sign In';
+            return;
+        }
+
+        contributorToken = loginData.token;
+        contributorKey = tokenData.key;
+        sessionStorage.setItem('mapContributorToken', loginData.token);
+        sessionStorage.setItem('mapContributorUsername', loginData.username);
+        sessionStorage.setItem('mapContributorKey', tokenData.key);
+
+        closeContributorLogin();
+        showContributorSignedIn(loginData.username);
+    } catch {
+        errEl.textContent = 'Network error — try again';
+        errEl.style.display = '';
+        btn.disabled = false; btn.textContent = 'Sign In';
+    }
+
+    btn.disabled = false; btn.textContent = 'Sign In';
+}
+
+function contributorSignOut() {
+    contributorToken = null;
+    contributorKey = null;
+    sessionStorage.removeItem('mapContributorToken');
+    sessionStorage.removeItem('mapContributorUsername');
+    sessionStorage.removeItem('mapContributorKey');
+    myDataFilterActive = false;
+    myDataHashes = null;
+    myDataPrefixSets = {};
+    showContributorSignedOut();
+    renderVisibleCoverage();
+}
+
+// ---------------------
 // My Data filter
 // ---------------------
-function onMyDataToggle() {
+async function onMyDataToggle() {
     const checked = document.getElementById('toggle-mydata').checked;
-    const inputRow = document.getElementById('mydata-input-row');
     const activeLabel = document.getElementById('mydata-active-label');
     const errorEl = document.getElementById('mydata-error');
 
@@ -1028,71 +1144,59 @@ function onMyDataToggle() {
         myDataFilterActive = false;
         myDataHashes = null;
         myDataPrefixSets = {};
-        inputRow.style.display = 'none';
         activeLabel.style.display = 'none';
         renderVisibleCoverage();
         return;
     }
 
-    // If we already have hashes loaded, re-enable immediately
+    // Use the session key directly
+    if (!contributorKey) {
+        document.getElementById('toggle-mydata').checked = false;
+        return;
+    }
+
+    // If hashes already loaded, re-enable immediately
     if (myDataHashes) {
         myDataFilterActive = true;
-        inputRow.style.display = 'none';
         activeLabel.style.display = '';
         renderVisibleCoverage();
         return;
     }
 
-    inputRow.style.display = '';
-    activeLabel.style.display = 'none';
+    await loadMyContributions(contributorKey);
 }
 
-async function applyMyDataFilter() {
-    const raw = document.getElementById('mydata-key-input').value.trim();
+async function loadMyContributions(key) {
     const errorEl = document.getElementById('mydata-error');
     const activeLabel = document.getElementById('mydata-active-label');
-
-    errorEl.style.display = 'none';
-
-    // Extract the key from a full URL or use as-is
-    let key = raw;
-    const match = raw.match(/\/api\/samples\/([A-Z0-9]{8})/i);
-    if (match) key = match[1];
-    key = key.toUpperCase();
-
-    if (!key || key.length < 4) {
-        errorEl.textContent = 'Paste your full submission URL or just the token (e.g. A1B2C3D4)';
-        errorEl.style.display = '';
-        return;
-    }
-
     try {
         const res = await fetch(`/api/contributions/${encodeURIComponent(key)}`);
         const data = await res.json();
         if (!res.ok) {
-            errorEl.textContent = data.error || 'Invalid token';
+            errorEl.textContent = data.error || 'Failed to load contributions';
             errorEl.style.display = '';
+            document.getElementById('toggle-mydata').checked = false;
             return;
         }
         myDataHashes = new Set(data.geohashes);
-        // Precompute prefix sets for each display precision level
         myDataPrefixSets = {};
         for (let p = 4; p <= 7; p++) {
             myDataPrefixSets[p] = new Set(data.geohashes.map(h => h.substring(0, p)));
         }
         myDataFilterActive = true;
-        document.getElementById('mydata-input-row').style.display = 'none';
         activeLabel.style.display = '';
         renderVisibleCoverage();
     } catch {
         errorEl.textContent = 'Network error — try again';
         errorEl.style.display = '';
+        document.getElementById('toggle-mydata').checked = false;
     }
 }
 
 // ---------------------
 // Initialize
 // ---------------------
+initContributorSession();
 loadData();
 
 // Auto-refresh every 30 seconds
