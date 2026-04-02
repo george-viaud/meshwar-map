@@ -57,7 +57,7 @@ function updateMapTiles() {
 // ---------------------
 const map = L.map('map', {
     center: [47.6588, -117.4260],
-    zoom: 10,
+    zoom: 16,
     preferCanvas: true,
     worldCopyJump: false,
     maxBounds: [[-90, -180], [90, 180]],
@@ -78,6 +78,33 @@ map.on('popupopen', (e) => {
 
 updateMapTiles();
 updateThemeIcon();
+
+// ── Geofence display filter ──────────────────────────────
+let displayGeofence = null; // polygon: [{lat,lng},...] or null
+
+function pointInPolygon(lat, lng, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lat, yi = polygon[i].lng;
+    const xj = polygon[j].lat, yj = polygon[j].lng;
+    if (((yi > lng) !== (yj > lng)) && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+async function loadDisplayGeofence() {
+  try {
+    const r = await fetch('/api/geofence');
+    if (r.ok) {
+      const data = await r.json();
+      displayGeofence = data ? data.polygon : null;
+    }
+  } catch (e) { /* no geofence */ }
+}
+
+loadDisplayGeofence();
 
 // ---------------------
 // Layer groups
@@ -216,6 +243,12 @@ function renderVisibleCoverage() {
             const precision = hash.length;
             const set = myDataPrefixSets[precision];
             if (set && !set.has(hash)) return;
+        }
+
+        // Geofence display filter
+        if (displayGeofence) {
+            const center = Geohash.center(hash);
+            if (!pointInPolygon(center.lat, center.lon, displayGeofence)) return;
         }
 
         const bounds = geohashToBounds(hash);
@@ -378,6 +411,9 @@ function updateHeatmap(aggregated) {
         // Viewport culling
         if (!mapBounds.contains([center.lat, center.lon])) return;
 
+        // Geofence display filter
+        if (displayGeofence && !pointInPolygon(center.lat, center.lon, displayGeofence)) return;
+
         const total = cell.received + cell.lost;
         if (total === 0) return;
 
@@ -431,6 +467,9 @@ function updateRepeaterMarkers(aggregated) {
         if (!cell.repeaters || typeof cell.repeaters !== 'object') return;
 
         const center = Geohash.center(hash);
+
+        // Geofence display filter
+        if (displayGeofence && !pointInPolygon(center.lat, center.lon, displayGeofence)) return;
 
         Object.entries(cell.repeaters).forEach(([nodeId, rep]) => {
             const existing = repeaters[nodeId];

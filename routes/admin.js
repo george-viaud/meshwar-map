@@ -216,4 +216,48 @@ router.delete('/users/:id', async (req, res) => {
   }
 });
 
+// ── GET /api/admin/geofence ───────────────────────────────────────────────────
+
+router.get('/geofence', async (req, res) => {
+  if (!requireAuth(req, res, ['admin', 'viewer'])) return;
+  try {
+    const result = await db.query("SELECT value FROM server_config WHERE key = 'geofence'");
+    res.json(result.rows.length ? result.rows[0].value : null);
+  } catch (err) {
+    internalError(res, err, 'GET /api/admin/geofence');
+  }
+});
+
+// ── PUT /api/admin/geofence ───────────────────────────────────────────────────
+
+router.put('/geofence', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  const { polygon } = req.body || {};
+  if (!Array.isArray(polygon) || polygon.length < 3) {
+    return res.status(400).json({ error: 'polygon must be an array of at least 3 {lat,lng} points' });
+  }
+  try {
+    await db.query(
+      `INSERT INTO server_config (key, value) VALUES ('geofence', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [JSON.stringify({ polygon })]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    internalError(res, err, 'PUT /api/admin/geofence');
+  }
+});
+
+// ── DELETE /api/admin/geofence ────────────────────────────────────────────────
+
+router.delete('/geofence', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  try {
+    await db.query("DELETE FROM server_config WHERE key = 'geofence'");
+    res.json({ success: true });
+  } catch (err) {
+    internalError(res, err, 'DELETE /api/admin/geofence');
+  }
+});
+
 module.exports = router;

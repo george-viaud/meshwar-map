@@ -24,6 +24,16 @@ app.use('/api/invite',        require('./routes/invite'));
 app.use('/api/admin',         require('./routes/admin'));
 app.use('/api/contributions', require('./routes/contributions'));
 
+app.get('/api/geofence', async (req, res) => {
+  try {
+    const result = await db.query("SELECT value FROM server_config WHERE key = 'geofence'");
+    res.json(result.rows.length ? result.rows[0].value : null);
+  } catch (err) {
+    console.error('GET /api/geofence error:', err);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
 // ── Static frontend ───────────────────────────────────────────────────────────
 
 app.get('/invite/:code', (req, res) =>

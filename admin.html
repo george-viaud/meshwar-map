@@ -185,7 +185,16 @@
 
   /* ── Invite link display ────────────────────────────── */
   .invite-code { font-family: var(--mono); font-size: 12px; color: var(--text-secondary); }
+
+  /* ── Geofence tab ──────────────────────────────────────── */
+  #geofence-map { height: 420px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-light); margin-bottom: 16px; }
+  .geofence-toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+  .geofence-status { font-size: 12px; color: var(--text-secondary); margin-left: auto; }
+  .geofence-status.active { color: var(--accent); }
+  .geofence-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.6; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
 </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
@@ -366,6 +375,24 @@
       </div>
     </div>
 
+    <!-- Geofence tab (admin only) -->
+    <div class="tab-panel" id="tab-geofence">
+      <div class="section-header">
+        <span class="section-title">Display Geofence</span>
+        <span class="geofence-status" id="geofence-status">No geofence set</span>
+      </div>
+      <div class="geofence-hint">
+        Drag vertex markers to reshape the polygon. <strong>Click on a polygon edge</strong> to add a new vertex. <strong>Ctrl+click a vertex</strong> to remove it (minimum 3 vertices required).
+      </div>
+      <div class="geofence-toolbar">
+        <button class="btn btn-secondary" onclick="geofenceReset()">Reset to Rectangle</button>
+        <button class="btn btn-accent" onclick="geofenceSave()" id="geofence-save-btn">Save Geofence</button>
+        <button class="btn btn-danger" onclick="geofenceClear()" id="geofence-clear-btn">Clear Geofence</button>
+      </div>
+      <div id="geofence-map"></div>
+      <div class="msg hidden" id="geofence-msg"></div>
+    </div>
+
     <!-- Users tab (admin) -->
     <div class="tab-panel" id="tab-users">
       <div class="section-header">
@@ -496,6 +523,7 @@ const ALL_TABS = [
   { id: 'contributors',  label: 'Contributors', roles: ['admin','viewer'] },
   { id: 'invites',       label: 'Invites',      roles: ['admin'] },
   { id: 'users',         label: 'Users',        roles: ['admin'] },
+  { id: 'geofence',      label: 'Geofence',     roles: ['admin'] },
 ];
 
 function visibleTabs(role) {
@@ -523,6 +551,7 @@ function switchTab(id) {
   if (id === 'contributors') loadContributors();
   if (id === 'invites')      loadInvites();
   if (id === 'users')        loadUsers();
+  if (id === 'geofence')     loadGeofenceTab();
 }
 
 // ── Login / Signout ───────────────────────────────────────
@@ -839,6 +868,182 @@ async function deleteUser(id) {
   if (!r) return;
   if (!r.ok) { showMsg('user-create-msg', r.data.error || 'Delete failed', false); return; }
   loadUsers();
+}
+
+// ── Geofence tab ──────────────────────────────────────────────────────────────
+let gfMap = null;
+let gfPolygon = null;
+let gfVertices = []; // [{lat, lng}, ...]
+let gfMarkers = [];  // L.Marker (draggable) per vertex
+let gfEdgeMarkers = []; // ghost midpoint markers for adding vertices
+let gfMapInited = false;
+
+function loadGeofenceTab() {
+  if (!gfMapInited) {
+    gfMapInited = true;
+    gfMap = L.map('geofence-map', {
+      center: [47.6588, -117.4260],
+      zoom: 10,
+    });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(gfMap);
+  }
+  // Load existing geofence
+  api('GET', '/api/admin/geofence')
+    .then(r => {
+      const data = (r && r.ok) ? r.data : null;
+      if (data && data.polygon && data.polygon.length >= 3) {
+        gfSetVertices(data.polygon);
+        updateGeofenceStatus(true);
+      } else {
+        gfSetDefaultRectangle();
+        updateGeofenceStatus(false);
+      }
+    })
+    .catch(() => gfSetDefaultRectangle());
+  // Ensure map renders correctly after tab becomes visible
+  setTimeout(() => { if (gfMap) gfMap.invalidateSize(); }, 50);
+}
+
+function gfSetDefaultRectangle() {
+  const c = gfMap.getCenter();
+  const d = 0.05;
+  gfSetVertices([
+    { lat: c.lat + d, lng: c.lng - d },
+    { lat: c.lat + d, lng: c.lng + d },
+    { lat: c.lat - d, lng: c.lng + d },
+    { lat: c.lat - d, lng: c.lng - d },
+  ]);
+}
+
+function gfSetVertices(verts) {
+  gfVertices = verts.map(v => ({ lat: v.lat, lng: v.lng }));
+  gfRender();
+}
+
+function gfRender() {
+  // Remove existing layers
+  gfMarkers.forEach(m => gfMap.removeLayer(m));
+  gfEdgeMarkers.forEach(m => gfMap.removeLayer(m));
+  if (gfPolygon) gfMap.removeLayer(gfPolygon);
+  gfMarkers = [];
+  gfEdgeMarkers = [];
+
+  const latlngs = gfVertices.map(v => [v.lat, v.lng]);
+
+  // Draw polygon
+  gfPolygon = L.polygon(latlngs, {
+    color: '#00e676',
+    fillColor: '#00e676',
+    fillOpacity: 0.08,
+    weight: 2,
+  }).addTo(gfMap);
+
+  // Vertex markers (draggable)
+  gfVertices.forEach((v, i) => {
+    const icon = L.divIcon({
+      className: '',
+      html: '<div style="width:14px;height:14px;background:#00e676;border:2px solid #fff;border-radius:50%;cursor:grab;box-shadow:0 0 6px rgba(0,230,118,0.6)"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+    const marker = L.marker([v.lat, v.lng], { draggable: true, icon }).addTo(gfMap);
+    marker.on('drag', e => {
+      gfVertices[i] = { lat: e.latlng.lat, lng: e.latlng.lng };
+      gfPolygon.setLatLngs(gfVertices.map(v => [v.lat, v.lng]));
+      gfUpdateEdgeMarkers();
+    });
+    marker.on('dragend', () => gfRender());
+    marker.on('click', e => {
+      if (e.originalEvent.ctrlKey || e.originalEvent.metaKey) {
+        if (gfVertices.length <= 3) return;
+        gfVertices.splice(i, 1);
+        gfRender();
+      }
+    });
+    gfMarkers.push(marker);
+  });
+
+  gfUpdateEdgeMarkers();
+  gfMap.invalidateSize();
+}
+
+function gfUpdateEdgeMarkers() {
+  gfEdgeMarkers.forEach(m => gfMap.removeLayer(m));
+  gfEdgeMarkers = [];
+  const n = gfVertices.length;
+  for (let i = 0; i < n; i++) {
+    const a = gfVertices[i];
+    const b = gfVertices[(i + 1) % n];
+    const midLat = (a.lat + b.lat) / 2;
+    const midLng = (a.lng + b.lng) / 2;
+    const idx = i; // capture
+    const icon = L.divIcon({
+      className: '',
+      html: '<div style="width:10px;height:10px;background:rgba(0,230,118,0.4);border:1px solid #00e676;border-radius:50%;cursor:pointer"></div>',
+      iconSize: [10, 10],
+      iconAnchor: [5, 5],
+    });
+    const m = L.marker([midLat, midLng], { icon }).addTo(gfMap);
+    m.on('click', () => {
+      gfVertices.splice(idx + 1, 0, { lat: midLat, lng: midLng });
+      gfRender();
+    });
+    gfEdgeMarkers.push(m);
+  }
+}
+
+function geofenceReset() {
+  gfSetDefaultRectangle();
+}
+
+async function geofenceSave() {
+  const btn = document.getElementById('geofence-save-btn');
+  const msg = document.getElementById('geofence-msg');
+  btn.disabled = true;
+  msg.classList.add('hidden');
+  const r = await api('PUT', '/api/admin/geofence', { polygon: gfVertices });
+  btn.disabled = false;
+  if (r && r.ok) {
+    msg.textContent = 'Geofence saved. The public map will now filter to this area.';
+    msg.className = 'msg msg-success';
+    msg.classList.remove('hidden');
+    updateGeofenceStatus(true);
+  } else {
+    msg.textContent = (r && r.data && r.data.error) ? r.data.error : 'Failed to save';
+    msg.className = 'msg msg-error';
+    msg.classList.remove('hidden');
+  }
+}
+
+async function geofenceClear() {
+  if (!confirm('Remove the display geofence? All coverage data will be shown globally.')) return;
+  const r = await api('DELETE', '/api/admin/geofence');
+  const msg = document.getElementById('geofence-msg');
+  if (r && r.ok) {
+    msg.textContent = 'Geofence cleared.';
+    msg.className = 'msg msg-success';
+    msg.classList.remove('hidden');
+    updateGeofenceStatus(false);
+    gfSetDefaultRectangle();
+  } else {
+    msg.textContent = 'Failed to clear geofence';
+    msg.className = 'msg msg-error';
+    msg.classList.remove('hidden');
+  }
+}
+
+function updateGeofenceStatus(active) {
+  const el = document.getElementById('geofence-status');
+  if (active) {
+    el.textContent = `Active — ${gfVertices.length} vertices`;
+    el.className = 'geofence-status active';
+  } else {
+    el.textContent = 'No geofence set';
+    el.className = 'geofence-status';
+  }
 }
 
 // ── Utility ───────────────────────────────────────────────
