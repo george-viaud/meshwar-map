@@ -123,6 +123,8 @@ const measureLayer = L.layerGroup().addTo(map);
 let cachedCoverage = null;      // Raw coverage data from API (precision 7)
 let currentETag = null;         // ETag for conditional requests
 let visibleRectangles = {};     // Map of hash -> L.rectangle currently on screen
+let visibleCells = {};          // Map of hash -> cell data, parallel to visibleRectangles
+let hoveredHash = null;         // Hash of cell currently under the mouse
 let coveragePrecision = 7;      // User-selected display precision
 let showRepeaters = false;
 let activeLinksHash = null;     // Geohash of the cell whose repeater links are shown
@@ -231,6 +233,7 @@ function renderVisibleCoverage() {
     // Clear existing rectangles
     coverageLayer.clearLayers();
     visibleRectangles = {};
+    visibleCells = {};
 
     let visibleCount = 0;
 
@@ -311,15 +314,9 @@ function renderVisibleCoverage() {
         rectangle.on('click', (e) => {
             L.DomEvent.stopPropagation(e);
         });
-        rectangle.on('mouseover', () => {
-            showRepeaterLinks(hash, cell);
-        });
-        rectangle.on('mouseout', () => {
-            clearRepeaterLinks();
-        });
-
         coverageLayer.addLayer(rectangle);
         visibleRectangles[hash] = rectangle;
+        visibleCells[hash] = cell;
     });
 
     console.log(`Rendered ${visibleCount} cells at precision ${targetPrecision} (${Object.keys(aggregated).length} total)`);
@@ -927,6 +924,28 @@ function changeResolution() {
 // ---------------------
 map.on('moveend', onViewportChange);
 map.on('zoomend', onViewportChange);
+
+// Hover over cells to show repeater link lines
+map.on('mousemove', (e) => {
+    const latlng = e.latlng;
+    for (const [hash, rect] of Object.entries(visibleRectangles)) {
+        if (rect.getBounds().contains(latlng)) {
+            if (hoveredHash !== hash) {
+                hoveredHash = hash;
+                showRepeaterLinks(hash, visibleCells[hash]);
+            }
+            return;
+        }
+    }
+    if (hoveredHash !== null) {
+        hoveredHash = null;
+        clearRepeaterLinks();
+    }
+});
+map.on('mouseout', () => {
+    hoveredHash = null;
+    clearRepeaterLinks();
+});
 
 // ---------------------
 // Toggle functions
