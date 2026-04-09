@@ -210,11 +210,26 @@ router.post('/:key', async (req, res) => {
       };
     }
 
-    let cellsUpdated = 0, cellsCreated = 0;
+    let cellsUpdated = 0, cellsCreated = 0, pointsEarned = 0, scoredNewCells = 0;
     const upserts = [];
 
     for (const [hash, newCell] of Object.entries(newCoverage)) {
       const old = existing[hash];
+
+      // Score this cell based on how well-mapped it already is
+      let basePts;
+      if (!old) {
+        basePts = 10;
+        scoredNewCells++;
+      } else if (old.samples < 10) {
+        basePts = 5;
+      } else if (old.samples < 50) {
+        basePts = 2;
+      } else {
+        basePts = 0;
+      }
+      pointsEarned += basePts + (newCell.received > 0 ? 2 : 0);
+
       if (old) {
         const decay = decayFactor(old.lastUpdate);
         upserts.push({
@@ -297,6 +312,20 @@ router.post('/:key', async (req, res) => {
       );
     }
 
+    // Award points
+    if (pointsEarned > 0) {
+      await db.query(
+        'UPDATE admin_users SET total_points = total_points + $1 WHERE id = $2',
+        [pointsEarned, userId]
+      );
+      await db.query(
+        'INSERT INTO point_events (user_id, points, new_cells) VALUES ($1, $2, $3)',
+        [userId, pointsEarned, scoredNewCells]
+      );
+    }
+    const ptRow = await db.query('SELECT total_points FROM admin_users WHERE id = $1', [userId]);
+    const totalPoints = ptRow.rows[0]?.total_points || 0;
+
     const totals = await db.query('SELECT COALESCE(SUM(cells),0) AS total FROM shard_index');
     const totalCells = parseInt(totals.rows[0].total);
 
@@ -309,10 +338,46 @@ router.post('/:key', async (req, res) => {
       cellsCreated,
       cellsPruned: pruned.rowCount,
       totalCells,
+      pointsEarned,
+      newCells: scoredNewCells,
+      totalPoints,
     });
 
   } catch (err) {
     internalError(res, err, 'POST /api/samples/:key');
+  }
+});
+
+// ── PATCH /api/samples/:key/display-name ─────────────────────────────────────
+
+router.patch('/:key/display-name', async (req, res) => {
+  const key = req.params.key?.toUpperCase();
+  try {
+    const authResult = await db.query(
+      `SELECT ct.user_id, ct.active, u.enabled
+       FROM contributor_tokens ct
+       JOIN admin_users u ON ct.user_id = u.id
+       WHERE ct.key = $1`,
+      [key]
+    );
+    const authRow = authResult.rows[0];
+    if (!authRow || !authRow.active || !authRow.enabled) {
+      return res.status(401).json({ error: 'Invalid or disabled token' });
+    }
+
+    const { displayName } = req.body || {};
+    if (typeof displayName !== 'string') {
+      return res.status(400).json({ error: 'displayName string required' });
+    }
+    const trimmed = displayName.trim().substring(0, 64);
+
+    await db.query(
+      'UPDATE admin_users SET display_name = $1 WHERE id = $2',
+      [trimmed || null, authRow.user_id]
+    );
+    res.json({ success: true, displayName: trimmed || null });
+  } catch (err) {
+    internalError(res, err, 'PATCH /api/samples/:key/display-name');
   }
 });
 

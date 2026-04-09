@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leaderboard — MeshCore Wardrive</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #121212;
+      color: #fff;
+      min-height: 100vh;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 20px;
+      background: rgba(30,30,30,0.98);
+      border-bottom: 1px solid #2a2a2a;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .back-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #00e676;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 10px;
+      border: 1px solid rgba(0,230,118,0.25);
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .back-btn:hover { background: rgba(0,230,118,0.1); }
+
+    .header-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #00e676;
+      flex: 1;
+    }
+
+    .header-subtitle {
+      font-size: 11px;
+      color: #666;
+      margin-top: 1px;
+    }
+
+    /* ── Name edit ────────────────────────────────────────────── */
+    .name-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      background: rgba(0,230,118,0.05);
+      border-bottom: 1px solid rgba(0,230,118,0.12);
+      font-size: 12px;
+      color: #aaa;
+    }
+    .name-bar.visible { display: flex; }
+    .name-bar input {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid #333;
+      border-radius: 5px;
+      color: #fff;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      width: 180px;
+      outline: none;
+    }
+    .name-bar input:focus { border-color: #00e676; }
+    .name-bar button {
+      padding: 5px 12px;
+      background: #00e676;
+      border: none;
+      border-radius: 5px;
+      color: #000;
+      font-size: 12px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .name-bar button:disabled { opacity: 0.5; cursor: default; }
+    .name-status { font-size: 11px; }
+    .name-status.ok  { color: #00e676; }
+    .name-status.err { color: #f44336; }
+
+    /* ── Tabs ─────────────────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 0 20px;
+      background: rgba(20,20,20,0.9);
+    }
+
+    .tab-btn {
+      padding: 12px 20px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #888;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      margin-bottom: -1px;
+    }
+    .tab-btn:hover { color: #ccc; }
+    .tab-btn.active {
+      color: #00e676;
+      border-bottom-color: #00e676;
+    }
+
+    /* ── Content ──────────────────────────────────────────────── */
+    .content {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+
+    .period-desc {
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 20px;
+    }
+
+    /* ── Table ────────────────────────────────────────────────── */
+    .lb-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .lb-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #555;
+      padding: 0 12px 10px;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    .lb-table th.num { text-align: right; }
+
+    .lb-table td {
+      padding: 10px 12px;
+      font-size: 14px;
+      border-bottom: 1px solid #1e1e1e;
+      vertical-align: middle;
+    }
+    .lb-table td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #aaa;
+    }
+
+    .lb-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+
+    .lb-table tbody tr.me {
+      background: rgba(0,230,118,0.07);
+      border-left: 2px solid #00e676;
+    }
+    .lb-table tbody tr.me td { color: #fff; }
+    .lb-table tbody tr.me td.num { color: #ccc; }
+
+    /* rank column */
+    .rank-cell {
+      font-size: 13px;
+      font-weight: 700;
+      color: #555;
+      width: 40px;
+      text-align: center;
+    }
+    .rank-cell.top1 { color: #ffd700; }
+    .rank-cell.top2 { color: #c0c0c0; }
+    .rank-cell.top3 { color: #cd7f32; }
+
+    .name-cell {
+      font-weight: 600;
+    }
+    .me-badge {
+      font-size: 10px;
+      font-weight: 700;
+      background: rgba(0,230,118,0.15);
+      color: #00e676;
+      border: 1px solid rgba(0,230,118,0.3);
+      border-radius: 4px;
+      padding: 1px 5px;
+      margin-left: 7px;
+      vertical-align: middle;
+    }
+
+    .pts-cell {
+      font-size: 15px;
+      font-weight: 700;
+      color: #00e676;
+      text-align: right;
+    }
+
+    /* ── My entry divider ─────────────────────────────────────── */
+    .my-entry-divider {
+      margin: 20px 0 8px;
+      font-size: 11px;
+      color: #555;
+      text-align: center;
+      letter-spacing: .05em;
+    }
+
+    /* ── States ───────────────────────────────────────────────── */
+    .state-msg {
+      text-align: center;
+      padding: 48px 20px;
+      color: #555;
+      font-size: 14px;
+    }
+    .state-msg .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid #2a2a2a;
+      border-top-color: #00e676;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .empty-msg {
+      text-align: center;
+      padding: 48px 20px;
+      color: #444;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <a href="/" class="back-btn">← Map</a>
+  <div>
+    <div class="header-title">🏆 Leaderboard</div>
+    <div class="header-subtitle">MeshCore Wardrive — Coverage Contributors</div>
+  </div>
+</div>
+
+<div class="name-bar" id="name-bar">
+  <span>Your display name:</span>
+  <input type="text" id="name-input" maxlength="64" placeholder="Enter a nickname…">
+  <button id="name-save-btn" onclick="saveName()">Save</button>
+  <span class="name-status" id="name-status"></span>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="selectPeriod('all',this)">All Time</button>
+  <button class="tab-btn" onclick="selectPeriod('monthly',this)">Monthly</button>
+  <button class="tab-btn" onclick="selectPeriod('weekly',this)">Weekly</button>
+</div>
+
+<div class="content">
+  <div class="period-desc" id="period-desc">Ranked by total points earned since the beginning.</div>
+  <div id="lb-body">
+    <div class="state-msg"><div class="spinner"></div>Loading…</div>
+  </div>
+</div>
+
+<script>
+const PERIOD_DESCS = {
+  all:     'Ranked by total points earned since the beginning.',
+  monthly: 'Ranked by points earned in the last 30 days.',
+  weekly:  'Ranked by points earned in the last 7 days.',
+};
+
+let currentPeriod = 'all';
+let contributorKey = null;
+const cache = {};
+
+// Grab auth from sessionStorage (shared with main map)
+contributorKey = sessionStorage.getItem('mapContributorKey') || null;
+
+if (contributorKey) {
+  const bar = document.getElementById('name-bar');
+  bar.classList.add('visible');
+}
+
+async function selectPeriod(period, btn) {
+  if (currentPeriod === period && cache[period]) return;
+  currentPeriod = period;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('period-desc').textContent = PERIOD_DESCS[period];
+  await loadLeaderboard(period);
+}
+
+async function loadLeaderboard(period) {
+  if (cache[period]) { render(cache[period]); return; }
+
+  document.getElementById('lb-body').innerHTML =
+    '<div class="state-msg"><div class="spinner"></div>Loading…</div>';
+
+  try {
+    let url = `/api/leaderboard?period=${period}`;
+    if (contributorKey) url += `&token=${encodeURIComponent(contributorKey)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    cache[period] = data;
+    render(data);
+  } catch (e) {
+    document.getElementById('lb-body').innerHTML =
+      `<div class="state-msg">Failed to load leaderboard.<br><small style="color:#444">${e.message}</small></div>`;
+  }
+}
+
+function rankClass(rank) {
+  if (rank === 1) return 'top1';
+  if (rank === 2) return 'top2';
+  if (rank === 3) return 'top3';
+  return '';
+}
+
+function fmtNum(n) {
+  return Number(n).toLocaleString();
+}
+
+function rowHtml(entry) {
+  const rc = rankClass(entry.rank);
+  const meBadge = entry.isMe ? '<span class="me-badge">YOU</span>' : '';
+  return `
+    <tr class="${entry.isMe ? 'me' : ''}">
+      <td class="rank-cell ${rc}">${entry.rank}</td>
+      <td class="name-cell">${esc(entry.displayName)}${meBadge}</td>
+      <td class="pts-cell">${fmtNum(entry.points)}</td>
+      <td class="num">${fmtNum(entry.uniqueCells)}</td>
+    </tr>`;
+}
+
+function render(data) {
+  const { entries, myEntry } = data;
+
+  if (!entries.length && !myEntry) {
+    document.getElementById('lb-body').innerHTML =
+      '<div class="empty-msg">No data yet. Upload some wardrive samples to get on the board!</div>';
+    return;
+  }
+
+  let html = `
+    <table class="lb-table">
+      <thead>
+        <tr>
+          <th style="width:40px">#</th>
+          <th>Name</th>
+          <th class="num">Points</th>
+          <th class="num">Cells</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${entries.map(rowHtml).join('')}
+      </tbody>
+    </table>`;
+
+  // Show caller's own entry below the table if they didn't make top 50
+  if (myEntry && !entries.some(e => e.isMe)) {
+    html += `
+      <div class="my-entry-divider">— Your rank —</div>
+      <table class="lb-table">
+        <tbody>${rowHtml(myEntry)}</tbody>
+      </table>`;
+  }
+
+  document.getElementById('lb-body').innerHTML = html;
+}
+
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Display name ──────────────────────────────────────────────
+
+async function saveName() {
+  if (!contributorKey) return;
+  const input = document.getElementById('name-input');
+  const status = document.getElementById('name-status');
+  const btn = document.getElementById('name-save-btn');
+  const name = input.value.trim();
+  btn.disabled = true;
+  status.textContent = '';
+  try {
+    const res = await fetch(`/api/samples/${encodeURIComponent(contributorKey)}/display-name`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: name }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    status.className = 'name-status ok';
+    status.textContent = '✓ Saved';
+    // Bust cache so the next load shows the new name
+    Object.keys(cache).forEach(k => delete cache[k]);
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  } catch (e) {
+    status.className = 'name-status err';
+    status.textContent = 'Failed to save';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Initial load
+loadLeaderboard('all');
+</script>
+</body>
+</html>

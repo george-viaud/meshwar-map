@@ -23,6 +23,7 @@ app.use('/api/me',            require('./routes/me'));
 app.use('/api/invite',        require('./routes/invite'));
 app.use('/api/admin',         require('./routes/admin'));
 app.use('/api/contributions', require('./routes/contributions'));
+app.use('/api/leaderboard',  require('./routes/leaderboard'));
 
 app.get('/api/geofence', async (req, res) => {
   try {
