@@ -111,6 +111,7 @@ loadDisplayGeofence();
 // ---------------------
 const coverageLayer = L.layerGroup().addTo(map);
 const repeaterLayer = L.layerGroup().addTo(map);
+const linkLayer    = L.layerGroup().addTo(map);
 const heatmapLayer = L.layerGroup(); // Not added by default
 const measureLayer = L.layerGroup().addTo(map);
 
@@ -122,6 +123,7 @@ let currentETag = null;         // ETag for conditional requests
 let visibleRectangles = {};     // Map of hash -> L.rectangle currently on screen
 let coveragePrecision = 7;      // User-selected display precision
 let showRepeaters = false;
+let activeLinksHash = null;     // Geohash of the cell whose repeater links are shown
 let showHeatmap = false;
 let renderPending = false;      // Debounce flag for viewport rendering
 
@@ -300,6 +302,11 @@ function renderVisibleCoverage() {
                 ${cell.appVersion ? `<div><span class="popup-label">App Version:</span> ${cell.appVersion}</div>` : ''}
             </div>
         `);
+
+        rectangle.on('click', (e) => {
+            L.DomEvent.stopPropagation(e);
+            showRepeaterLinks(hash, cell);
+        });
 
         coverageLayer.addLayer(rectangle);
         visibleRectangles[hash] = rectangle;
@@ -522,6 +529,90 @@ function updateRepeaterMarkers(aggregated) {
     });
 
     console.log(`Plotted ${Object.keys(repeaters).length} repeater markers`);
+}
+
+// ---------------------
+// Repeater link lines
+// ---------------------
+function rssiToLinkColor(rssi) {
+    if (rssi == null || rssi <= -999) return '#aaaaaa';
+    if (rssi >= -70)  return '#00e676';
+    if (rssi >= -85)  return '#ffff00';
+    if (rssi >= -100) return '#ffaa00';
+    return '#ff4444';
+}
+
+// Build a nodeId → best-position index from precision-7 data
+function buildRepeaterPositionIndex() {
+    if (!cachedCoverage) return {};
+    const index = {};
+    Object.entries(cachedCoverage).forEach(([hash, cell]) => {
+        if (!cell.repeaters || typeof cell.repeaters !== 'object') return;
+        const center = Geohash.center(hash);
+        Object.entries(cell.repeaters).forEach(([nodeId, rep]) => {
+            const existing = index[nodeId];
+            const rssi = rep.rssi ?? -999;
+            if (!existing || rssi > (existing.rssi ?? -999)) {
+                index[nodeId] = { lat: center.lat, lon: center.lon, name: rep.name, rssi: rep.rssi };
+            }
+        });
+    });
+    return index;
+}
+
+function clearRepeaterLinks() {
+    linkLayer.clearLayers();
+    activeLinksHash = null;
+}
+
+function showRepeaterLinks(hash, cell) {
+    // Toggle off when clicking the same cell again
+    if (activeLinksHash === hash) {
+        clearRepeaterLinks();
+        return;
+    }
+    clearRepeaterLinks();
+
+    if (!cell.repeaters || !Object.keys(cell.repeaters).length) return;
+
+    const posIndex = buildRepeaterPositionIndex();
+    const cellCenter = Geohash.center(hash);
+    const from = [cellCenter.lat, cellCenter.lon];
+
+    Object.entries(cell.repeaters).forEach(([nodeId, rep]) => {
+        const pos = posIndex[nodeId];
+        if (!pos) return;
+
+        const color = rssiToLinkColor(rep.rssi);
+        const to = [pos.lat, pos.lon];
+
+        const line = L.polyline([from, to], {
+            color,
+            weight: 2,
+            opacity: 0.85,
+            dashArray: '6, 4',
+        });
+
+        const rssiText = rep.rssi != null ? `${rep.rssi} dBm` : 'N/A';
+        const snrText  = rep.snr  != null ? `${rep.snr} dB`   : 'N/A';
+        line.bindTooltip(`${rep.name || nodeId}<br>${rssiText} / ${snrText}`, {
+            sticky: true,
+            className: 'link-tooltip',
+        });
+
+        linkLayer.addLayer(line);
+
+        // Dot at the repeater end
+        linkLayer.addLayer(L.circleMarker(to, {
+            radius: 5,
+            color,
+            fillColor: color,
+            fillOpacity: 0.9,
+            weight: 1,
+        }));
+    });
+
+    activeLinksHash = hash;
 }
 
 // ---------------------
@@ -918,7 +1009,10 @@ function setUnit(unit) {
 }
 
 map.on('click', function(e) {
-    if (!measureActive) return;
+    if (!measureActive) {
+        clearRepeaterLinks();
+        return;
+    }
 
     if (measurePoints.length < 2) {
         measurePoints.push(e.latlng);

@@ -680,6 +680,21 @@ body.light-theme .timelapse-btn:hover {
     background: rgba(0, 0, 0, 0.1);
 }
 
+/* Repeater link tooltips */
+.link-tooltip {
+    background: rgba(20, 20, 20, 0.92);
+    border: 1px solid #444;
+    color: #fff;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.link-tooltip::before {
+    display: none;
+}
+
 /* Repeater markers */
 .repeater-marker-icon {
     display: flex;
