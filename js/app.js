@@ -66,6 +66,7 @@ const map = L.map('map', {
 
 // Popup scroll handling
 map.on('popupopen', (e) => {
+    popupOpen = true;
     const el = e.popup.getElement()?.querySelector('.leaflet-popup-content');
     if (el) {
         L.DomEvent.disableScrollPropagation(el);
@@ -75,6 +76,7 @@ map.on('popupopen', (e) => {
     e.popup.options.autoPanPaddingTopLeft = [16, 64];
     e.popup.options.autoPanPaddingBottomRight = [16, 64];
 });
+map.on('popupclose', () => { popupOpen = false; });
 
 updateMapTiles();
 updateThemeIcon();
@@ -126,6 +128,7 @@ let showRepeaters = false;
 let activeLinksHash = null;     // Geohash of the cell whose repeater links are shown
 let showHeatmap = false;
 let renderPending = false;      // Debounce flag for viewport rendering
+let popupOpen = false;          // True while a cell popup is visible
 
 // Time-lapse state
 let timelapseActive = false;
@@ -208,6 +211,7 @@ function scheduleRender() {
 
 function renderVisibleCoverage() {
     if (!cachedCoverage) return;
+    if (popupOpen) return;  // Don't destroy cells while a popup is open (autopan fires moveend)
 
     const mapBounds = map.getBounds();
     const zoom = map.getZoom();
@@ -280,9 +284,10 @@ function renderVisibleCoverage() {
         // Build repeaters popup HTML
         let repeatersHtml = 'None';
         if (cell.repeaters && typeof cell.repeaters === 'object') {
-            const repeaterList = Object.values(cell.repeaters).map(rep => {
+            const repeaterList = Object.entries(cell.repeaters).map(([nodeId, rep]) => {
                 const escapedName = (rep.name || 'Unknown').replace(/'/g, "\\'");
-                return `<span class="repeater-link" onclick="showRepeaterInfo('${escapedName}', ${rep.rssi}, ${rep.snr}, '${rep.lastSeen}')" title="Click for details">${rep.name}</span>`;
+                const escapedId = nodeId.replace(/'/g, "\\'");
+                return `<span class="repeater-link" onclick="showRepeaterInfo('${escapedName}', ${rep.rssi}, ${rep.snr}, '${rep.lastSeen}', '${escapedId}')" title="Click for details">${rep.name}</span>`;
             });
             if (repeaterList.length > 0) repeatersHtml = repeaterList.join(', ');
         }
@@ -305,7 +310,12 @@ function renderVisibleCoverage() {
 
         rectangle.on('click', (e) => {
             L.DomEvent.stopPropagation(e);
+        });
+        rectangle.on('mouseover', () => {
             showRepeaterLinks(hash, cell);
+        });
+        rectangle.on('mouseout', () => {
+            clearRepeaterLinks();
         });
 
         coverageLayer.addLayer(rectangle);
@@ -1089,7 +1099,7 @@ function lockMapAndScroll() {
     document.body.classList.add('modal-open');
 }
 
-function showRepeaterInfo(name, rssi, snr, lastSeen) {
+function showRepeaterInfo(name, rssi, snr, lastSeen, nodeId) {
     lockMapAndScroll();
 
     document.getElementById('modal-title').textContent = `Repeater: ${name}`;
@@ -1108,6 +1118,10 @@ function showRepeaterInfo(name, rssi, snr, lastSeen) {
                     <span style="color: #aaa;">Repeater Name:</span>
                     <strong style="font-size: 15px; color: #00e676; margin-left: 8px;">${name}</strong>
                 </div>
+                ${nodeId ? `<div style="margin: 8px 0;">
+                    <span style="color: #aaa;">Node ID:</span>
+                    <strong style="font-size: 13px; color: #fff; margin-left: 8px; font-family: monospace;">${nodeId}</strong>
+                </div>` : ''}
                 <div style="margin: 8px 0;">
                     <span style="color: #aaa;">RSSI:</span>
                     <strong style="font-size: 15px; color: #00e676; margin-left: 8px;">${rssiText}</strong>
