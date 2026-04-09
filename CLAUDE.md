@@ -13,9 +13,33 @@ node server.js
 
 # Run with hot reload (Node 18+)
 node --watch server.js
+
+# Run all tests
+npm test
+
+# Run a single test file
+npx jest tests/aggregation.test.js
+
+# Run tests matching a description
+npx jest --testNamePattern "decayFactor"
 ```
 
 All environment variables must be set before running — see Deployment below.
+
+### Required environment variables
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `PG_PASSWORD` | — | Required |
+| `ADMIN_TOKEN` | — | Used for `DELETE /api/samples` and initial admin bootstrap |
+| `JWT_SECRET` | — | Required for login/session tokens |
+| `PG_HOST` | `postgres` | |
+| `PG_PORT` | `5432` | |
+| `PG_DB` | `wardrive` | |
+| `PG_USER` | `wardrive` | |
+| `REDIS_HOST` | `redis` | |
+| `REDIS_PORT` | `6379` | |
+| `PORT` | `3000` | |
 
 ## Deployment
 
@@ -60,14 +84,38 @@ The app serves two things from a single port (3001 on apollo → 3000 inside con
 - **Static frontend** — `index.html`, `js/app.js`, `css/style.css` (Leaflet map)
 - **REST API** — `GET/POST/DELETE /api/samples`
 
-### API behaviour
+### API routes
 
-| Method | Behaviour |
-|--------|-----------|
-| `GET /api/samples` | Returns shard index (prefix → metadata). Redis-cached for 10s with ETag support. |
-| `GET /api/samples?prefixes=xyz,abc` | Returns full coverage cell data for requested shards. Per-shard Redis cache. |
-| `POST /api/samples` | Deduplicates via Redis (`seen:{id}` keys, 90-day TTL), aggregates into geohash-7 cells, upserts PostgreSQL, invalidates cache. |
-| `DELETE /api/samples` | Requires `Authorization: Bearer <ADMIN_TOKEN>`. Wipes all data. |
+**Coverage data** (`routes/samples.js`):
+| Method | Endpoint | Auth | Behaviour |
+|--------|----------|------|-----------|
+| `GET` | `/api/samples` | none | Shard index (prefix → metadata). ETag + 10s Redis cache. |
+| `GET` | `/api/samples?prefixes=xyz,abc` | none | Full cell data for requested shards. Per-shard Redis cache. |
+| `GET` | `/api/samples/:key/validate` | contributor token | Validates a contributor token. |
+| `POST` | `/api/samples/:key` | contributor token | Deduplicates, aggregates, upserts. Token is the 8-char uppercase key in the path. |
+| `DELETE` | `/api/samples` | `Bearer ADMIN_TOKEN` | Wipes all coverage data. |
+
+**Auth & users** (`routes/auth.js`, `routes/me.js`, `routes/tokens.js`, `routes/admin.js`):
+| Method | Endpoint | Auth | Behaviour |
+|--------|----------|------|-----------|
+| `POST` | `/api/auth/login` | none | Returns JWT (24h). Rate-limited 10/min per IP. |
+| `GET` | `/api/me` | JWT | Own user info. |
+| `GET/POST/DELETE` | `/api/me/token` | JWT | Manage own contributor token. |
+| `GET/POST/PATCH/DELETE` | `/api/admin/users` | JWT admin | User management. |
+| `GET/PATCH` | `/api/admin/contributors` | JWT admin/viewer | Contributor list. |
+| `GET` | `/api/admin/token-search` | JWT admin/viewer | Look up a contributor token. |
+| `GET/POST/DELETE` | `/api/admin/invites` | JWT admin | Invite link management. |
+| `GET/PUT/DELETE` | `/api/admin/geofence` | JWT admin/viewer | Server geofence polygon. |
+
+**Invite flow** (`routes/invite.js`):
+| Method | Endpoint | Behaviour |
+|--------|----------|-----------|
+| `GET` | `/api/invite/:code` | Validate invite link. |
+| `POST` | `/api/invite/:code` | Register account + get contributor token. |
+
+**Other:**
+- `GET /api/geofence` — public geofence read (for frontend display)
+- `GET /api/contributions/:key` — list geohashes contributed by a token
 
 ### Data model
 
@@ -102,6 +150,36 @@ Cells older than 90 days are pruned on each POST.
 - `shard:{prefix}` — cached shard data, 10s TTL, invalidated on write
 - `index` — cached shard index response, 10s TTL, invalidated on write
 - `global_version` — cached version counter
+
+### User roles
+
+- `admin` — full access, user/invite management, geofence config
+- `viewer` — read-only admin UI (contributors, token search, geofence read)
+- `contributor` — uploads coverage data via token-in-path API
+
+On first startup with no users in `admin_users`, a user `admin` is bootstrapped with password equal to `ADMIN_TOKEN`.
+
+### Server modules (`lib/`)
+
+- `lib/db.js` — pg Pool, configured via `PG_*` env vars
+- `lib/redis.js` — ioredis client, configured via `REDIS_*` env vars
+- `lib/auth.js` — `requireAuth(req, res, roles[])` JWT middleware, `generateKey()` (8-char contributor token), `generateInviteCode()` (24-char), `internalError()`
+- `lib/aggregation.js` — `aggregateSamples()`, `decayFactor()`, `computeSampleId()`, `shardPrefix()`
+- `lib/rateLimit.js` — Redis-backed sliding window rate limiter
+
+### Database schema
+
+Managed via SQL migration files in `db/migrations/` (applied automatically at startup in filename order). The `schema_migrations` table tracks what's been applied.
+
+**`admin_users`** — accounts with `role` (admin/viewer/contributor), `password_hash`, `enabled`, `invite_id`
+
+**`contributor_tokens`** — 8-char uppercase keys linked to a user; used in POST path (`/api/samples/:key`)
+
+**`invite_links`** — single-use or multi-use invite codes with `uses_remaining` counter; registering via `/api/invite/:code` atomically decrements the counter
+
+**`user_contributions`** — tracks which geohash-7 cells each contributor has uploaded to
+
+**`server_config`** — key/value store for server settings (currently only `geofence`)
 
 ### Frontend
 
