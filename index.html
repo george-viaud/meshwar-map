@@ -66,7 +66,25 @@
             </div>
             <div class="toggle-item">
                 <input type="checkbox" id="toggle-repeaters" onchange="toggleRepeaterLayer()">
-                <label for="toggle-repeaters">Show Repeaters</label>
+                <label for="toggle-repeaters">Show Repeater Markers</label>
+            </div>
+            <div class="toggle-item">
+                <input type="checkbox" id="toggle-signal-only" onchange="toggleSignalOnly()">
+                <label for="toggle-signal-only">Signal only (hide no-ping cells)</label>
+            </div>
+        </div>
+
+        <div class="layer-toggles" id="repeater-filter-section">
+            <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none;" onclick="toggleRepeaterFilterPanel()">
+                <div style="font-size:12px; font-weight:600; color:#aaa;">Repeater Filter <span id="repeater-filter-count" style="color:#00e676;"></span></div>
+                <span id="repeater-filter-arrow" style="font-size:10px; color:#aaa;">▶</span>
+            </div>
+            <div id="repeater-filter-body" style="display:none; margin-top:8px;">
+                <div style="display:flex; gap:6px; margin-bottom:8px;">
+                    <button onclick="setAllRepeaters(true)" style="flex:1; padding:4px 8px; background:rgba(0,230,118,0.1); border:1px solid rgba(0,230,118,0.25); border-radius:4px; color:#00e676; font-size:11px; font-family:inherit; cursor:pointer;">All On</button>
+                    <button onclick="setAllRepeaters(false)" style="flex:1; padding:4px 8px; background:rgba(255,100,100,0.1); border:1px solid rgba(255,100,100,0.25); border-radius:4px; color:#ff6464; font-size:11px; font-family:inherit; cursor:pointer;">All Off</button>
+                </div>
+                <div id="repeater-list" style="max-height:200px; overflow-y:auto;"></div>
             </div>
         </div>
 

@@ -142,6 +142,13 @@ let timelapseMaxDate = null;
 // Measure tool state
 let measureActive = false;
 
+// Signal-only filter state
+let showSignalOnly = false;
+
+// Repeater filter state
+let hiddenRepeaters = new Set();  // nodeIds toggled off
+let repeaterFilterOpen = false;
+
 // My Data filter state
 let myDataFilterActive = false;
 let myDataHashes = null;        // Set of precision-7 geohashes from the server
@@ -258,6 +265,15 @@ function renderVisibleCoverage() {
         if (displayGeofence) {
             const center = Geohash.center(hash);
             if (!pointInPolygon(center.lat, center.lon, displayGeofence)) return;
+        }
+
+        // Signal-only filter
+        if (showSignalOnly && cell.received <= 0) return;
+
+        // Repeater filter — hide cells where every heard repeater is toggled off
+        if (hiddenRepeaters.size > 0 && cell.repeaters) {
+            const ids = Object.keys(cell.repeaters);
+            if (ids.length > 0 && ids.every(id => hiddenRepeaters.has(id))) return;
         }
 
         const bounds = geohashToBounds(hash);
@@ -842,6 +858,7 @@ async function onViewportChange() {
             const loaded = await loadVisibleShards();
             if (loaded) {
                 updateNodeCount();
+                if (repeaterFilterOpen) renderRepeaterList();
                 scheduleRender();
             }
         } finally {
@@ -897,6 +914,7 @@ async function loadData() {
 
             // Update node count from actual loaded data
             updateNodeCount();
+            if (repeaterFilterOpen) renderRepeaterList();
 
             if (timelapseActive) initTimelapse();
             scheduleRender();
@@ -950,6 +968,85 @@ map.on('mouseout', () => {
 // ---------------------
 // Toggle functions
 // ---------------------
+function toggleSignalOnly() {
+    showSignalOnly = document.getElementById('toggle-signal-only').checked;
+    scheduleRender();
+}
+
+function toggleRepeaterFilterPanel() {
+    repeaterFilterOpen = !repeaterFilterOpen;
+    document.getElementById('repeater-filter-body').style.display = repeaterFilterOpen ? '' : 'none';
+    document.getElementById('repeater-filter-arrow').textContent = repeaterFilterOpen ? '▼' : '▶';
+    if (repeaterFilterOpen) renderRepeaterList();
+}
+
+function buildRepeaterCatalog() {
+    if (!cachedCoverage) return {};
+    const catalog = {};
+    Object.values(cachedCoverage).forEach(cell => {
+        if (!cell.repeaters || typeof cell.repeaters !== 'object') return;
+        Object.entries(cell.repeaters).forEach(([nodeId, rep]) => {
+            if (!catalog[nodeId]) {
+                catalog[nodeId] = { name: rep.name || nodeId, cellCount: 0, lastSeen: rep.lastSeen || '' };
+            } else {
+                if ((rep.lastSeen || '') > catalog[nodeId].lastSeen) catalog[nodeId].lastSeen = rep.lastSeen;
+            }
+            catalog[nodeId].cellCount++;
+        });
+    });
+    return catalog;
+}
+
+function renderRepeaterList() {
+    const list = document.getElementById('repeater-list');
+    const countEl = document.getElementById('repeater-filter-count');
+    if (!list || !countEl) return;
+
+    const catalog = buildRepeaterCatalog();
+    const entries = Object.entries(catalog).sort((a, b) =>
+        (a[1].name).localeCompare(b[1].name)
+    );
+
+    const total = entries.length;
+    const active = entries.filter(([id]) => !hiddenRepeaters.has(id)).length;
+    countEl.textContent = hiddenRepeaters.size > 0 ? `(${active}/${total})` : `(${total})`;
+
+    list.innerHTML = entries.map(([nodeId, rep]) => {
+        const checked = !hiddenRepeaters.has(nodeId) ? 'checked' : '';
+        const safeName = rep.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        const shortId = nodeId.substring(0, 8);
+        return `<div class="toggle-item" style="margin-bottom:5px; align-items:flex-start;">
+            <input type="checkbox" id="rep-${nodeId}" ${checked} onchange="toggleRepeater('${nodeId}', this.checked)" style="margin-top:2px; flex-shrink:0;">
+            <label for="rep-${nodeId}" style="font-size:11px; line-height:1.4; cursor:pointer;">
+                <span style="color:#fff; font-weight:500;">${safeName}</span><br>
+                <span style="color:#555; font-family:monospace; font-size:10px;">${shortId}</span>
+                <span style="color:#555; font-size:10px;"> · ${rep.cellCount} cells</span>
+            </label>
+        </div>`;
+    }).join('');
+}
+
+function toggleRepeater(nodeId, visible) {
+    if (visible) {
+        hiddenRepeaters.delete(nodeId);
+    } else {
+        hiddenRepeaters.add(nodeId);
+    }
+    renderRepeaterList();
+    scheduleRender();
+}
+
+function setAllRepeaters(visible) {
+    const catalog = buildRepeaterCatalog();
+    if (visible) {
+        hiddenRepeaters.clear();
+    } else {
+        Object.keys(catalog).forEach(id => hiddenRepeaters.add(id));
+    }
+    renderRepeaterList();
+    scheduleRender();
+}
+
 function toggleCoverage() {
     if (document.getElementById('toggle-coverage').checked) {
         map.addLayer(coverageLayer);
