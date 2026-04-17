@@ -331,6 +331,7 @@ function renderVisibleCoverage() {
                 <div style="font-size: 10px; color: #888; margin-top: 4px;">Click repeater name for signal details</div>
                 <div><span class="popup-label">Last Update:</span> ${new Date(cell.lastUpdate).toLocaleDateString()}</div>
                 ${cell.appVersion ? `<div><span class="popup-label">App Version:</span> ${cell.appVersion}</div>` : ''}
+                <div style="font-size: 10px; color: #666; margin-top: 6px; font-family: monospace;">cell: ${hash} &nbsp;·&nbsp; shard: ${hash.slice(0,3)}</div>
             </div>
         `);
 
