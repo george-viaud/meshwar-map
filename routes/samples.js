@@ -173,6 +173,12 @@ router.post('/:key', async (req, res) => {
       return res.status(400).json({ error: 'samples array required' });
     }
 
+    await db.query(
+      `INSERT INTO raw_uploads (contributor_key, sample_count, payload)
+       VALUES ($1, $2, $3)`,
+      [key, samples.length, JSON.stringify(samples)]
+    );
+
     const withIds = samples.map(s => ({ ...s, __id: computeSampleId(s) }));
     const seenFlags = await Promise.all(withIds.map(s => redis.exists(`seen:${s.__id}`)));
     const deduped = withIds.filter((_, i) => !seenFlags[i]);
