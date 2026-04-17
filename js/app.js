@@ -144,6 +144,7 @@ let measureActive = false;
 
 // Signal-only filter state
 let showSignalOnly = false;
+let hideDeadZones = false;
 
 // Repeater filter state
 let hiddenRepeaters = new Set();  // nodeIds toggled off
@@ -269,6 +270,12 @@ function renderVisibleCoverage() {
 
         // Signal-only filter
         if (showSignalOnly && cell.received <= 0) return;
+
+        // Dead-zone filter — hide red cells (<10% success rate)
+        if (hideDeadZones) {
+            const total = cell.received + cell.lost;
+            if (total > 0 && cell.received / total < 0.1) return;
+        }
 
         // Repeater filter — hide cells where every heard repeater is toggled off
         if (hiddenRepeaters.size > 0 && cell.repeaters) {
@@ -970,6 +977,11 @@ map.on('mouseout', () => {
 // ---------------------
 function toggleSignalOnly() {
     showSignalOnly = document.getElementById('toggle-signal-only').checked;
+    scheduleRender();
+}
+
+function toggleHideDeadZones() {
+    hideDeadZones = document.getElementById('toggle-hide-dead-zones').checked;
     scheduleRender();
 }
 
