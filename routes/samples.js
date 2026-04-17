@@ -75,7 +75,7 @@ router.get('/', async (req, res) => {
             samples:    row.samples,
             repeaters:  row.repeaters,
             firstSeen:  row.first_seen,
-            lastUpdate: row.last_update,
+            lastUpdate: row.last_update?.toISOString(),
             appVersion: row.app_version,
           };
           Object.assign(coverage, byPrefix[p]);
@@ -205,7 +205,7 @@ router.post('/:key', async (req, res) => {
         samples:    row.samples,
         repeaters:  row.repeaters,
         firstSeen:  row.first_seen,
-        lastUpdate: row.last_update,
+        lastUpdate: row.last_update?.toISOString(),
         appVersion: row.app_version,
       };
     }
