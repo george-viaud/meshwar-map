@@ -149,6 +149,9 @@ let hideDeadZones = false;
 // Repeater filter state
 let hiddenRepeaters = new Set();  // nodeIds toggled off
 let repeaterFilterOpen = false;
+let repeaterPanelHovered = false;
+let repeaterTypeSearch = '';
+let repeaterTypeTimer = null;
 
 // My Data filter state
 let myDataFilterActive = false;
@@ -1496,6 +1499,45 @@ async function loadMyContributions(key) {
         document.getElementById('toggle-mydata').checked = false;
     }
 }
+
+// ---------------------
+// Repeater list type-ahead
+// ---------------------
+(function () {
+    const section = document.getElementById('repeater-filter-section');
+    if (section) {
+        section.addEventListener('mouseenter', () => { repeaterPanelHovered = true; });
+        section.addEventListener('mouseleave', () => { repeaterPanelHovered = false; });
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (!repeaterFilterOpen || !repeaterPanelHovered) return;
+        const tag = document.activeElement?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+
+        repeaterTypeSearch += e.key.toLowerCase();
+
+        clearTimeout(repeaterTypeTimer);
+        repeaterTypeTimer = setTimeout(() => { repeaterTypeSearch = ''; }, 2000);
+
+        const catalog = buildRepeaterCatalog();
+        const match = Object.entries(catalog)
+            .sort((a, b) => a[1].name.localeCompare(b[1].name))
+            .find(([, rep]) => rep.name.toLowerCase().startsWith(repeaterTypeSearch));
+
+        if (!match) return;
+        const el = document.getElementById(`rep-${match[0]}`);
+        if (!el) return;
+        const item = el.closest('.toggle-item');
+        if (!item) return;
+        item.scrollIntoView({ block: 'nearest' });
+        item.style.transition = 'background 0.15s';
+        item.style.background = 'rgba(0,230,118,0.15)';
+        clearTimeout(item._highlightTimer);
+        item._highlightTimer = setTimeout(() => { item.style.background = ''; }, 1500);
+    });
+})();
 
 // ---------------------
 // Initialize
