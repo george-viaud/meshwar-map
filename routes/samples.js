@@ -147,16 +147,16 @@ router.get('/:key/validate', validateRateLimit, async (req, res) => {
 
     const [cfgResult, msgResult] = await Promise.all([
       db.query(`SELECT value FROM server_config WHERE key = 'min_app_version'`),
-      db.query(`SELECT id, title, body FROM admin_messages WHERE active = TRUE LIMIT 1`),
+      db.query(`SELECT id, title, body FROM admin_messages WHERE active = TRUE ORDER BY created_at ASC`),
     ]);
 
     const minVersion = cfgResult.rows[0]?.value?.version ?? null;
-    const msg = msgResult.rows[0] ?? null;
+    const messages = msgResult.rows.map(m => ({ id: m.id, title: m.title ?? null, body: m.body }));
 
     res.json({
       valid: true,
       min_version: minVersion,
-      message: msg ? { id: msg.id, title: msg.title ?? null, body: msg.body } : null,
+      messages,
     });
   } catch (err) {
     internalError(res, err, 'GET /api/samples/:key/validate');
