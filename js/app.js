@@ -1524,7 +1524,7 @@ async function loadMyContributions(key) {
         const catalog = buildRepeaterCatalog();
         const match = Object.entries(catalog)
             .sort((a, b) => a[1].name.localeCompare(b[1].name))
-            .find(([, rep]) => rep.name.toLowerCase().startsWith(repeaterTypeSearch));
+            .find(([, rep]) => rep.name.toLowerCase().includes(repeaterTypeSearch));
 
         if (!match) return;
         const el = document.getElementById(`rep-${match[0]}`);
