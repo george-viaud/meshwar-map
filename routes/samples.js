@@ -144,7 +144,20 @@ router.get('/:key/validate', validateRateLimit, async (req, res) => {
     if (!row || !row.active || !row.enabled) {
       return res.status(401).json({ valid: false, error: 'Invalid or disabled token' });
     }
-    res.json({ valid: true });
+
+    const [cfgResult, msgResult] = await Promise.all([
+      db.query(`SELECT value FROM server_config WHERE key = 'min_app_version'`),
+      db.query(`SELECT id, title, body FROM admin_messages WHERE active = TRUE LIMIT 1`),
+    ]);
+
+    const minVersion = cfgResult.rows[0]?.value?.version ?? null;
+    const msg = msgResult.rows[0] ?? null;
+
+    res.json({
+      valid: true,
+      min_version: minVersion,
+      message: msg ? { id: msg.id, title: msg.title ?? null, body: msg.body } : null,
+    });
   } catch (err) {
     internalError(res, err, 'GET /api/samples/:key/validate');
   }

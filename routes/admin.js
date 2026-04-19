@@ -260,4 +260,116 @@ router.delete('/geofence', async (req, res) => {
   }
 });
 
+// ── GET /api/admin/min-version ────────────────────────────────────────────────
+
+router.get('/min-version', async (req, res) => {
+  if (!requireAuth(req, res, ['admin', 'viewer'])) return;
+  try {
+    const result = await db.query(`SELECT value FROM server_config WHERE key = 'min_app_version'`);
+    res.json({ min_version: result.rows[0]?.value?.version ?? null });
+  } catch (err) {
+    internalError(res, err, 'GET /api/admin/min-version');
+  }
+});
+
+// ── PUT /api/admin/min-version ────────────────────────────────────────────────
+
+router.put('/min-version', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  const { version } = req.body || {};
+  if (version !== null && version !== undefined) {
+    if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
+      return res.status(400).json({ error: 'version must be "X.Y.Z" format or null' });
+    }
+  }
+  try {
+    if (!version) {
+      await db.query(`DELETE FROM server_config WHERE key = 'min_app_version'`);
+    } else {
+      await db.query(
+        `INSERT INTO server_config (key, value) VALUES ('min_app_version', $1)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [JSON.stringify({ version })]
+      );
+    }
+    res.json({ success: true, min_version: version || null });
+  } catch (err) {
+    internalError(res, err, 'PUT /api/admin/min-version');
+  }
+});
+
+// ── GET /api/admin/messages ───────────────────────────────────────────────────
+
+router.get('/messages', async (req, res) => {
+  if (!requireAuth(req, res, ['admin', 'viewer'])) return;
+  try {
+    const result = await db.query(
+      `SELECT id, title, body, active, created_at FROM admin_messages ORDER BY created_at DESC`
+    );
+    res.json({ messages: result.rows });
+  } catch (err) {
+    internalError(res, err, 'GET /api/admin/messages');
+  }
+});
+
+// ── POST /api/admin/messages ──────────────────────────────────────────────────
+
+router.post('/messages', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  const { title, body, active } = req.body || {};
+  if (!body || typeof body !== 'string' || !body.trim()) {
+    return res.status(400).json({ error: 'body is required' });
+  }
+  try {
+    if (active) {
+      await db.query(`UPDATE admin_messages SET active = FALSE`);
+    }
+    const result = await db.query(
+      `INSERT INTO admin_messages (title, body, active)
+       VALUES ($1, $2, $3)
+       RETURNING id, title, body, active, created_at`,
+      [title?.trim() || null, body.trim(), active === true]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    internalError(res, err, 'POST /api/admin/messages');
+  }
+});
+
+// ── PATCH /api/admin/messages/:id ─────────────────────────────────────────────
+
+router.patch('/messages/:id', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  const id = parseInt(req.params.id);
+  const { active } = req.body || {};
+  if (active === undefined) return res.status(400).json({ error: 'active required' });
+  try {
+    if (active) {
+      await db.query(`UPDATE admin_messages SET active = FALSE`);
+    }
+    const result = await db.query(
+      `UPDATE admin_messages SET active = $1 WHERE id = $2
+       RETURNING id, title, body, active, created_at`,
+      [active === true, id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Message not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    internalError(res, err, 'PATCH /api/admin/messages/:id');
+  }
+});
+
+// ── DELETE /api/admin/messages/:id ────────────────────────────────────────────
+
+router.delete('/messages/:id', async (req, res) => {
+  if (!requireAuth(req, res, ['admin'])) return;
+  try {
+    const result = await db.query(`DELETE FROM admin_messages WHERE id = $1`, [parseInt(req.params.id)]);
+    if (!result.rowCount) return res.status(404).json({ error: 'Message not found' });
+    res.json({ success: true });
+  } catch (err) {
+    internalError(res, err, 'DELETE /api/admin/messages/:id');
+  }
+});
+
 module.exports = router;
