@@ -396,7 +396,7 @@
     <!-- Users tab (admin) -->
     <div class="tab-panel" id="tab-users">
       <div class="section-header">
-        <span class="section-title">Admin &amp; Viewer Users</span>
+        <span class="section-title">Users</span>
         <button class="btn btn-accent" onclick="toggleUserForm()">+ Add User</button>
       </div>
       <div class="create-form hidden" id="user-create-form">
@@ -413,6 +413,7 @@
           <select id="new-user-role">
             <option value="viewer">Viewer</option>
             <option value="admin">Admin</option>
+            <option value="contributor">Contributor</option>
           </select>
         </div>
         <div class="create-form-actions">
@@ -791,17 +792,23 @@ async function loadUsers() {
   const session = getSession();
   const tbody = document.getElementById('users-tbody');
   if (!r.ok) { tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">Error loading users</div></td></tr>`; return; }
-  const users = (r.data.users || []).filter(u => u.role !== 'contributor');
+  const users = r.data.users || [];
   if (!users.length) {
-    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-state-icon">&#128100;</div>No admin or viewer users.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-state-icon">&#128100;</div>No users.</div></td></tr>`;
     return;
   }
   tbody.innerHTML = users.map(u => {
     const isSelf = u.id === session?.userId;
+    const roleOptions = ['admin','viewer','contributor']
+      .map(r => `<option value="${r}"${r===u.role?' selected':''}>${r}</option>`).join('');
     return `
       <tr id="user-row-${u.id}">
         <td><strong>${escHtml(u.username)}</strong>${isSelf ? ' <span style="font-size:11px;color:var(--text-muted)">(you)</span>' : ''}</td>
-        <td><span class="role-pill ${u.role}">${u.role}</span></td>
+        <td>
+          ${isSelf
+            ? `<span class="role-pill ${u.role}">${u.role}</span>`
+            : `<select onchange="changeUserRole(${u.id}, this.value)" style="font-size:12px;padding:3px 6px;">${roleOptions}</select>`}
+        </td>
         <td><span class="badge ${u.enabled ? 'badge-enabled' : 'badge-disabled'}">${u.enabled ? 'Active' : 'Disabled'}</span></td>
         <td style="color:var(--text-muted);font-size:12px;">${fmtDate(u.created_at)}</td>
         <td>
@@ -844,6 +851,14 @@ async function createUser() {
 async function toggleUser(id, enabled) {
   const r = await api('PATCH', `/api/admin/users/${id}`, { enabled });
   if (!r || !r.ok) return;
+  loadUsers();
+}
+
+async function changeUserRole(id, role) {
+  const r = await api('PATCH', `/api/admin/users/${id}`, { role });
+  if (!r) return;
+  if (!r.ok) { showMsg('user-create-msg', r.data.error || 'Failed to change role', false); loadUsers(); return; }
+  showMsg('user-create-msg', 'Role updated.', true);
   loadUsers();
 }
 
